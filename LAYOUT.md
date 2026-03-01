@@ -1,0 +1,44 @@
+# Layout (Canonical)
+
+```text
+iran-war-uae-monitor/
+  scripts/
+    run_monitor.py
+    run_now.py
+    check_runtime_paths.py
+    init_storage.py
+    demo_hourly_job.py
+    query_db.py
+  src/
+    iran_monitor/
+      app.py
+      config.py
+      reporter.py
+      phase2_ai.py
+      health.py
+      storage.py
+      storage_adapter.py
+      schema.sql
+      scrapers/
+        __init__.py
+        uae_media.py
+        social_media.py
+        rss_feed.py
+  tests/
+    test_phase2_ai.py
+    test_reporter_phase2.py
+    test_reporter_telegram_chunking.py
+    test_rss_feed.py
+    test_runtime_paths.py
+    test_main_phase2_flow.py
+    test_storage_adapter.py
+    test_storage_integration.py
+    test_legacy_wrapper.py
+  docs/
+    ARCHITECTURE.md
+    LAYOUT.md
+    CHANGELOG.md
+  pyproject.toml
+  pytest.ini
+  README.md
+```
