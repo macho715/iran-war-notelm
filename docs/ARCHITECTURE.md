@@ -5,7 +5,19 @@
 - 실행 기준 루트: `C:\Users\jichu\Downloads\iran-war-notelm-main`
 - 스크래핑 입력: `uae_media.py` + `social_media.py` + `rss_feed.py`
 - 분석 출력: `AnalysisResult`(위협/감성/도시별 리스크) + 즉시 경보 게이팅
-- 영속화: `.notebooklm_id`, `.health_state.json`, `reports/{date}/{time}.json`
+- 영속화: `Postgres/SQLite` + `reports/{date}/{time}.json`, `reports/{date}.jsonl`
+  + `.notebooklm_id`, `.health_state.json`, `state/seen_articles.json`, `ledger/`
+- 중복제거: in-process `_seen_hashes`와 DB(`articles.canonical_url`) 이중 dedup
+- 실행 진입: `main.py`(compat wrapper) → `scripts/run_monitor.py` → `src/iran_monitor.app.run()`
+
+## 2.0 운영 강화 포인트
+
+- 단일 인스턴스: `state/monitor.lock` + stale lock 자동 회수
+- Telegram 전송: 4096자 청크 분할 + Markdown parse fallback
+- Outbox: 파일(`outbox/YYYY-MM-DD/*`) + DB(`outbox`) 동시 미러
+- 연속 실행 검증:
+  - 신규 기사 유입 1회차 `new_count=2` 처리 후 즉시 2회차 `new_count=0` 확인
+  - 2회차에서 outbox 추가 적재 없음(중복 억제)
 
 ---
 
@@ -30,7 +42,7 @@ flowchart TD
     SM --> IG["Instagram Tags"]
 
     RSS --> RSSE["RSS Entries"]
-    MERGE & FB & IG & RSSE --> DEDUP["🔁 DEDUPLICATION\nMD5 Hash Filter\n_seen_hashes set"]
+    MERGE & FB & IG & RSSE --> DEDUP["🔁 DEDUPLICATION\nrun-local _seen_hashes + DB canonical_url"]
 
     DEDUP -->|새 기사| NLM["🤖 NotebookLM\nAI Analysis Layer"]
     DEDUP -->|중복/없음| SKIP["⏭️ 보고 생략"]
@@ -45,6 +57,7 @@ flowchart TD
     P2 --> REPORT["📝 REPORTING LAYER\n_build_report()"]
     REPORT --> ARCHIVE["💾 Option A JSON 아카이브\nreports/YYYY-MM-DD/HH-MM.json"]
     REPORT --> HEALTH["❤️ 헬스 상태 기록\n.health_state.json"]
+    REPORT --> DASH["🧭 Vercel Dashboard 조회\nruns/articles/outbox"]
 
     REPORT --> TG["📡 Telegram Bot\npython-telegram-bot\n개인 알림"]
     REPORT --> WA["💬 Twilio WhatsApp\n팀원 전원 발송\n1500자 자동 분할"]
@@ -98,6 +111,9 @@ graph TD
     MAIN --> P2AI["phase2_ai.py"]
 
     REP --> CONFIG
+    MAIN --> STORAGE["storage.py / storage_backend.py"]
+    STORAGE --> DB["Postgres/SQLite"]
+
     REP --> TGSDK["python-telegram-bot"]
     REP --> TWSDK["twilio SDK"]
 
@@ -111,6 +127,7 @@ graph TD
 
     NLMT --> AUTH["core/auth\nAuthManager"]
     NLMT --> CLI["core/client\nNotebookLMClient"]
+    STORAGE --> DASHUI["dashboard API/조회 화면"]
 
     P2AI --> NLMT
 
@@ -126,7 +143,7 @@ graph TD
 ```mermaid
 flowchart LR
     A["🌐 HTML Pages"] -->|"Playwright / httpx"| B["list[dict]\n{source,title,link}"]
-    B -->|"MD5 filter"| C["list[dict]\n새 기사만"]
+    B -->|"dedup (hash + DB canonical_url)"| C["list[dict]\n새 기사만"]
     C -->|"형식화"| D["str\n뉴스 텍스트 블록"]
     D -->|"NotebookLM API"| E["Source UUID\n노트북에 저장"]
     E -->|"Phase2 분석"| P2["AnalysisResult\n위협/감성/도시별"]

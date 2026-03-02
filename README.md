@@ -18,11 +18,13 @@ C:\Users\jichu\Downloads\iran-war-notelm-main
 
 ---
 
-## ✅ v1.6 통합 운영 기준
+## ✅ v2.0 통합 운영 기준
 
 - Canonical 실행 경로: `C:\Users\jichu\Downloads\iran-war-notelm-main`
-- Phase 1 + Phase 2가 루트 프로젝트에 통합됨 (RSS/Health + AI 분석/즉시 경보)
-- Option A(JSON 아카이브): `reports/{YYYY-MM-DD}/{HH-MM}.json` 저장
+- Phase 1 + Phase 2가 `src/iran_monitor` 기반 런타임으로 통합됨 (RSS/Health/AI/출력 모두 canonical)
+- Phase 4 저장 체계: 기본 SQLite + `DATABASE_URL` 설정 시 Postgres SSOT
+- Dedup 정책: run-local MD5 해시 + DB(`articles.canonical_url`) 이중 필터
+- Option A(JSON 아카이브): `reports/{YYYY-MM-DD}/{HH-MM}.json` + `reports/{YYYY-MM-DD}.jsonl` 저장
 - 중첩 폴더 `iran-war-notelm-main\iran-war-notelm-main`는 실행 대상 아님
 
 ---
@@ -42,7 +44,7 @@ flowchart TD
     D --> D1[Facebook]
     D --> D2[Instagram]
 
-    C1 & C2 & C3 & D1 & D2 --> E["🔁 중복 제거<br/>MD5 Hash Filter"]
+    C1 & C2 & C3 & D1 & D2 --> E["🔁 중복 제거<br/>hash + DB(canonical_url)"]
 
     E -->|새 기사| F["🤖 NotebookLM<br/>AI 분석 업로드"]
     E -->|중복/없음| Z["⏭️ 스킵"]
@@ -69,7 +71,7 @@ flowchart TD
 | 기능 | 설명 |
 |---|---|
 | 🕷️ **투트랙 스크래퍼** | Playwright(JS 렌더링) + httpx(HTTP 직접 요청) 병렬 스크래핑 |
-| 🔁 **중복 제거** | MD5 해시 기반 기사 중복 필터링 |
+| 🔁 **중복 제거** | in-process hash + DB(`canonical_url`) 이중 중복 필터 |
 | 🤖 **AI 분석** | Google NotebookLM 자동 업로드 + 소스 분석 |
 | 🧠 **Phase 2 AI 위협 평가** | NotebookLM query 기반 위협 분석, 실패 시 rule-based fallback |
 | 🚨 **HIGH/CRITICAL 즉시 경보** | 위협 레벨에 따른 조건부 즉시 Telegram 경보 |
@@ -113,6 +115,11 @@ WHATSAPP_RECIPIENTS=+971501234567,+821012345678
 # Option A JSON 아카이브
 REPORTS_ARCHIVE_ENABLED=true
 REPORTS_ARCHIVE_DIR=reports
+
+# Phase 4 (Runner + Postgres + Vercel)
+DATABASE_URL=<neon_dsn>
+STORAGE_BACKEND=postgres
+# Vercel Dashboard에서도 동일 DATABASE_URL을 사용해야 합니다.
 ```
 
 ### 3. NotebookLM 로그인 (최초 1회)
@@ -135,8 +142,28 @@ python scripts/check_runtime_paths.py
 ```bash
 python main.py        # 매시간 자동 실행
 python scripts/run_now.py  # 즉시 1회 실행 (테스트)
-python -m pytest -q   # 전체 테스트
+python scripts/run_monitor.py   # 단일 인스턴스 락 가드 경로로 실행
+python -m pytest -q
 ```
+
+### 5. Phase 4 운영 체인(권장)
+
+현재 운영 체인(권장):
+
+- Runner: GitHub Actions → `scripts/run_now.py --telegram-send`
+- Data plane: Neon/Postgres(`DATABASE_URL`) + 기존 JSON/JSONL 아카이브
+- Control plane: Vercel dashboard (`dashboard/`, root directory `dashboard`)
+- 단일 인스턴스: `state/monitor.lock` 가드로 다중 실행 차단
+- 중복 억제: run-local hash + DB `articles.canonical_url`
+
+운영 점검 체크리스트:
+
+1. `workflow_dispatch` 1회 실행
+2. `runs`/`articles`/`outbox` DB 적재 확인
+3. `reports/YYYY-MM-DD/HH-00.json` + `reports/YYYY-MM-DD.jsonl` 생성 확인
+4. Vercel에서 최신 `run` 조회/표시 확인
+5. Telegram/WhatsApp 전송 실패 또는 승인 거절 시 outbox 저장 확인
+6. 신규 기사 유입 샘플(run1 `new_count=2`) 후 즉시 2회차 재실행(run2 `new_count=0`)으로 중복 전송 억제 확인
 
 ---
 
