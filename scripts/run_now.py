@@ -1,12 +1,27 @@
-import asyncio
-from reporter import send_telegram_report
+#!/usr/bin/env python
+"""Canonical one-shot runner with optional dry-run."""
 
-# Formatted based on the real time Google Search results
-articles = [
-    {"source": "The National (Abu Dhabi)", "title": "Abu Dhabi's Zayed International Airport airspace closed. One fatality reported and several injured from falling drone debris in residential area.", "link": "https://thenationalnews.com/uae/live"},
-    {"source": "Gulf News", "title": "[LIVE] UAE airports suspend flights following Iran drone and missile attacks in response to regional conflict.", "link": "https://gulfnews.com/uae/live"},
-    {"source": "Khaleej Times", "title": "Dubai International (DXB) confirms minor damage to a concourse. All major UAE airlines including Emirates, Etihad, and flydubai suspend operations.", "link": "https://khaleejtimes.com/aviation"},
-    {"source": "Instagram", "title": "Instagram Post: Residents sharing footage of intercepted drones over Abu Dhabi skyline", "link": "https://instagram.com/explore/tags/abudhabiairport"},
-]
+from __future__ import annotations
 
-asyncio.run(send_telegram_report(articles))
+import argparse
+from main import _run_once
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run monitor one cycle")
+    parser.add_argument("--dry-run", action="store_true", help="Run once without outbound send")
+    parser.add_argument("--telegram-send", action="store_true", help="Skip approval gate and send immediately")
+    parser.add_argument("--json-archive", action="store_true", help="Force JSON archive on")
+    parser.add_argument("--json-archive-off", action="store_true", help="Force JSON archive off")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    json_archive = True if args.json_archive else (False if args.json_archive_off else None)
+    _run_once(telegram_send=args.telegram_send, dry_run=args.dry_run, json_archive=json_archive)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
