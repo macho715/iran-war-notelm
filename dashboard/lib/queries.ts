@@ -34,6 +34,28 @@ export type OutboxRow = {
   file_path: string | null;
 };
 
+export type SafeRowsResult<T> = {
+  rows: T[];
+  error: string | null;
+};
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+}
+
+async function queryRowsSafe<T>(label: string, queryFn: () => Promise<T[]>): Promise<SafeRowsResult<T>> {
+  try {
+    return { rows: await queryFn(), error: null };
+  } catch (err) {
+    const msg = errorMessage(err);
+    console.error(`[dashboard] ${label} query failed: ${msg}`);
+    return { rows: [], error: msg };
+  }
+}
+
 export async function fetchRuns(limit = 24): Promise<RunRow[]> {
   const pool = getPool();
   const { rows } = await pool.query<RunRow>(
@@ -44,6 +66,10 @@ export async function fetchRuns(limit = 24): Promise<RunRow[]> {
     [limit]
   );
   return rows;
+}
+
+export async function fetchRunsSafe(limit = 24): Promise<SafeRowsResult<RunRow>> {
+  return queryRowsSafe("runs", () => fetchRuns(limit));
 }
 
 export async function fetchArticles(limit = 50): Promise<ArticleRow[]> {
@@ -58,6 +84,10 @@ export async function fetchArticles(limit = 50): Promise<ArticleRow[]> {
   return rows;
 }
 
+export async function fetchArticlesSafe(limit = 50): Promise<SafeRowsResult<ArticleRow>> {
+  return queryRowsSafe("articles", () => fetchArticles(limit));
+}
+
 export async function fetchOutbox(limit = 50): Promise<OutboxRow[]> {
   const pool = getPool();
   const { rows } = await pool.query<OutboxRow>(
@@ -68,6 +98,10 @@ export async function fetchOutbox(limit = 50): Promise<OutboxRow[]> {
     [limit]
   );
   return rows;
+}
+
+export async function fetchOutboxSafe(limit = 50): Promise<SafeRowsResult<OutboxRow>> {
+  return queryRowsSafe("outbox", () => fetchOutbox(limit));
 }
 
 export async function fetchOutboxMsg(msgId: string): Promise<OutboxRow | null> {

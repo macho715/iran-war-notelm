@@ -51,6 +51,13 @@ async function sendToTelegram(token: string, chatId: string, text: string): Prom
   }
 }
 
+function errMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+}
+
 export async function POST(req: NextRequest) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -74,7 +81,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "msg_id 필요" }, { status: 400 });
   }
 
-  const row = await fetchOutboxMsg(msgId);
+  let row;
+  try {
+    row = await fetchOutboxMsg(msgId);
+  } catch (err) {
+    const msg = errMessage(err);
+    return NextResponse.json({ ok: false, error: `Outbox 조회 실패: ${msg}` }, { status: 502 });
+  }
+
   if (!row) {
     return NextResponse.json({ ok: false, error: "msg_id 없음" }, { status: 404 });
   }
@@ -91,11 +105,20 @@ export async function POST(req: NextRequest) {
     for (const chunk of chunks) {
       await sendToTelegram(token, chatId, chunk);
     }
-    await updateOutboxStatus(msgId, "SENT", null);
+    try {
+      await updateOutboxStatus(msgId, "SENT", null);
+    } catch (err) {
+      const msg = errMessage(err);
+      return NextResponse.json({ ok: false, error: `전송 성공했지만 상태 업데이트 실패: ${msg}` }, { status: 502 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await updateOutboxStatus(msgId, "FAILED", msg);
+    const msg = errMessage(err);
+    try {
+      await updateOutboxStatus(msgId, "FAILED", msg);
+    } catch {
+      // Preserve original send failure as response even if DB update also fails.
+    }
     return NextResponse.json({ ok: false, error: msg }, { status: 502 });
   }
 }

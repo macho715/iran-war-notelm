@@ -1,4 +1,4 @@
-import { fetchRuns } from "../../lib/queries";
+import { fetchRunsSafe } from "../../lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +13,15 @@ function badge(level: string) {
 }
 
 export default async function RunsPage() {
-  const runs = await fetchRuns(200);
+  const { rows: runs, error } = await fetchRunsSafe(200);
   return (
     <>
       <h1>Runs</h1>
+      {error ? (
+        <p style={{ padding: 10, border: "1px solid #fca5a5", borderRadius: 8, background: "#fff1f2" }}>
+          DB 조회 실패: <code>{error}</code>
+        </p>
+      ) : null}
       <p style={{ fontSize: 13, opacity: 0.8 }}>
         저장된 runs 최신 200건. (정렬: run_ts DESC)
       </p>
