@@ -1,51 +1,77 @@
-name: Iran-UAE Monitor
+name: Iran-UAE Monitor (hourly)
 
 on:
   schedule:
-    # Run every hour
-    - cron: '0 * * * *'
-  workflow_dispatch: # Allow manual trigger
+    # GitHub Actions schedule runs in UTC. Avoid 00 minute to reduce queue contention.
+    - cron: '7 * * * *'
+  workflow_dispatch: {}
 
 jobs:
   run-monitor:
     runs-on: ubuntu-latest
-    
+
+    defaults:
+      run:
+        working-directory: iran-war-uae-monitor
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-          
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          
+          pip install -r ../requirements.txt
+
       - name: Install Playwright browsers
         run: |
           playwright install chromium
           playwright install-deps chromium
-          
-      - name: Run Scraper
+
+      - name: Run monitor once (canonical)
         env:
+          # Telegram
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          # Twilio WhatsApp (optional)
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_WHATSAPP_FROM: ${{ secrets.TWILIO_WHATSAPP_FROM }}
+          WHATSAPP_RECIPIENTS: ${{ secrets.WHATSAPP_RECIPIENTS }}
+
+          # Storage backend (Phase 4)
+          # - If DATABASE_URL is set, backend auto-switches to postgres.
+          # - If empty, it stays sqlite (local file).
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          STORAGE_BACKEND: ${{ secrets.STORAGE_BACKEND }}
+          STORAGE_ENABLED: "true"
+
+          # Runtime
           HEADLESS: "true"
           LOG_LEVEL: "INFO"
+
+          # Phase 2 (NotebookLM): cloud default = false for stability.
+          # Override by setting secret PHASE2_ENABLED to "true".
+          PHASE2_ENABLED: ${{ secrets.PHASE2_ENABLED != '' && secrets.PHASE2_ENABLED || 'false' }}
         run: |
-          # Since it's a cron job, we want it to run once and exit, not loop forever like APScheduler
-          # creating a simple executor for GitHub Actions run
-          echo "import asyncio" > run_once.py
-          echo "from main import hourly_job, initialize_logger" >> run_once.py
-          echo "async def run():" >> run_once.py
-          echo "    try:" >> run_once.py
-          echo "        await hourly_job()" >> run_once.py
-          echo "    except Exception as e:" >> run_once.py
-          echo "        print(f'Error: {e}')" >> run_once.py
-          echo "if __name__ == '__main__':" >> run_once.py
-          echo "    asyncio.run(run())" >> run_once.py
-          python run_once.py
+          python scripts/run_now.py
+
+      - name: Upload artifacts (reports/state/ledger) for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-artifacts-${{ github.run_id }}
+          path: |
+            iran-war-uae-monitor/reports
+            iran-war-uae-monitor/state
+            iran-war-uae-monitor/ledger
+            iran-war-uae-monitor/.health_state.json
+          if-no-files-found: ignore
+          retention-days: 7

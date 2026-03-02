@@ -1,12 +1,11 @@
-"""
-Iran-UAE monitor app (canonical runtime).
+"""Iran-UAE monitor app (canonical runtime).
 
 Pipeline:
 1) scrape (UAE + SNS + RSS)
-2) deduplicate
+2) deduplicate (persistent in Phase 4)
 3) NotebookLM upload + phase2 analysis
 4) immediate alert (HIGH/CRITICAL) + periodic report send
-5) persist A+B storage via persist_run()
+5) persist A+B storage (SQLite or Postgres) via persist_run_backend()
 6) update health state
 """
 
@@ -37,14 +36,17 @@ from .reporter import build_report_text, send_report_text, send_telegram_alert
 from .scrapers.rss_feed import scrape_rss
 from .scrapers.social_media import scrape_social_media
 from .scrapers.uae_media import scrape_uae_media
-from .storage import persist_run
 from .storage_adapter import build_article_rows, build_outbox_rows, build_run_payload
+from .storage_backend import get_existing_canonical_urls, persist_run_backend
 
 logger = structlog.get_logger()
 
+# In-process dedup (still useful for long-running local mode)
 _seen_hashes: set[str] = set()
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_ROOT = PROJECT_ROOT
+
 NOTEBOOK_TITLE = "실시간 이란-UAE 보안 브리핑 (자동화)"
 
 
@@ -64,6 +66,7 @@ def _resolve_storage_path(value: str) -> Path:
 
 NOTEBOOKLM_ID_FILE = _resolve_storage_path(settings.NOTEBOOKLM_ID_FILE)
 HEALTH_STATE_FILE = _resolve_storage_path(settings.HEALTH_STATE_FILE)
+
 _LOCK_HELD_BY_CURRENT_PROCESS = False
 
 
@@ -72,13 +75,65 @@ def _article_hash(article: dict) -> str:
     return hashlib.md5(key.encode()).hexdigest()
 
 
-def _filter_new(articles: list[dict]) -> list[dict]:
-    new = []
+def _unique_by_canonical_url(articles: list[dict]) -> list[dict]:
+    """Dedup within the same run by canonical_url(link)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for a in articles:
+        url = str(a.get("link") or a.get("canonical_url") or "").strip()
+        if not url:
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        # normalize for downstream storage_adapter
+        a["canonical_url"] = url
+        out.append(a)
+    return out
+
+
+def _filter_new_persistent(all_articles: list[dict]) -> list[dict]:
+    """Phase 4 핵심: 재시작/크론에서도 중복 제거가 유지되어야 함.
+
+    Priority:
+    1) DB dedup (articles.canonical_url 존재 여부)
+    2) in-process dedup (_seen_hashes)
+    """
+    # run-local dedup first
+    unique = _unique_by_canonical_url(all_articles)
+
+    # If storage is disabled or DB-dedup disabled -> fall back to in-process only
+    if not settings.STORAGE_ENABLED or not settings.DEDUP_USE_DB:
+        return _filter_new_in_process(unique)
+
+    try:
+        storage_root = _storage_root()
+        db_path = _resolve_storage_path(settings.STORAGE_DB_PATH)
+        schema_path = _resolve_storage_path(settings.STORAGE_SCHEMA_PATH)
+
+        urls = [str(a["canonical_url"]) for a in unique if a.get("canonical_url")]
+        existing = get_existing_canonical_urls(
+            root=storage_root,
+            sqlite_db_path=db_path,
+            sqlite_schema_path=schema_path,
+            canonical_urls=urls,
+        )
+        new = [a for a in unique if str(a.get("canonical_url")) not in existing]
+        # still guard against duplicates in the same process execution
+        return _filter_new_in_process(new)
+    except Exception as exc:
+        logger.warning("DB 기반 dedup 실패 -> in-process dedup으로 fallback", error=str(exc))
+        return _filter_new_in_process(unique)
+
+
+def _filter_new_in_process(articles: list[dict]) -> list[dict]:
+    new: list[dict] = []
     for article in articles:
         article_hash = _article_hash(article)
-        if article_hash not in _seen_hashes:
-            _seen_hashes.add(article_hash)
-            new.append(article)
+        if article_hash in _seen_hashes:
+            continue
+        _seen_hashes.add(article_hash)
+        new.append(article)
     return new
 
 
@@ -130,7 +185,6 @@ def _get_or_create_notebook(client: NotebookLMClient) -> str:
             notebook_title = getattr(notebook, "title", "") or ""
             if NOTEBOOK_TITLE in notebook_title or "이란-UAE" in notebook_title:
                 matched.append(_extract_id(notebook))
-
         if matched:
             notebook_id = matched[0]
             for duplicate_id in matched[1:]:
@@ -155,7 +209,6 @@ def _get_or_create_notebook(client: NotebookLMClient) -> str:
 def _upload_to_notebooklm(articles: list[dict]) -> dict[str, str] | None:
     if not articles:
         return None
-
     try:
         with _create_notebook_client() as client:
             notebook_id = _get_or_create_notebook(client)
@@ -166,7 +219,6 @@ def _upload_to_notebooklm(articles: list[dict]) -> dict[str, str] | None:
                     f"**[{article['source']}]** {article['title']}\n링크: {article['link']}\n"
                 )
             content = "\n".join(content_lines)
-
             source = client.add_text_source(notebook_id, content, title=f"업데이트 {now_str}")
             source_id = _extract_id(source)
             client.wait_for_source_ready(notebook_id, source_id)
@@ -195,7 +247,9 @@ def _write_health_state(
             data["last_article_count"] = last_article_count
         if last_error:
             data["last_error"] = last_error
-        HEALTH_STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        HEALTH_STATE_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except Exception as exc:
         logger.warning("헬스 상태 파일 기록 실패", error=str(exc))
 
@@ -207,6 +261,7 @@ def _lock_file_path() -> Path:
 def _pid_exists(pid: int) -> bool:
     if pid <= 0:
         return False
+
     if os.name == "nt":
         try:
             import ctypes
@@ -221,6 +276,7 @@ def _pid_exists(pid: int) -> bool:
             return True
         except Exception:
             return False
+
     try:
         os.kill(pid, 0)
         return True
@@ -248,23 +304,19 @@ def _read_lock_pid(path: Path) -> int | None:
 
 def _acquire_single_instance_lock() -> bool:
     global _LOCK_HELD_BY_CURRENT_PROCESS
-
     if not settings.SINGLE_INSTANCE_GUARD_ENABLED:
         return True
 
     lock_path = _lock_file_path()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    current_pid = os.getpid()
 
+    current_pid = os.getpid()
     while True:
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(
-                    {
-                        "pid": current_pid,
-                        "created_at": datetime.now().isoformat(),
-                    },
+                    {"pid": current_pid, "created_at": datetime.now().isoformat()},
                     f,
                     ensure_ascii=False,
                 )
@@ -285,6 +337,7 @@ def _acquire_single_instance_lock() -> bool:
                         error=str(exc),
                     )
                     alive = False
+
             if alive:
                 logger.warning(
                     "이미 실행 중인 모니터 인스턴스 감지, 현재 프로세스 종료",
@@ -294,7 +347,7 @@ def _acquire_single_instance_lock() -> bool:
                 )
                 return False
 
-            # stale/invalid lock file cleanup and retry
+            # stale lock cleanup and retry
             try:
                 lock_path.unlink()
                 logger.warning("stale lock 제거 후 재시도", lock_file=str(lock_path), stale_pid=existing_pid)
@@ -310,7 +363,6 @@ def _acquire_single_instance_lock() -> bool:
 
 def _release_single_instance_lock() -> None:
     global _LOCK_HELD_BY_CURRENT_PROCESS
-
     if not settings.SINGLE_INSTANCE_GUARD_ENABLED:
         return
     if not _LOCK_HELD_BY_CURRENT_PROCESS:
@@ -411,12 +463,11 @@ def _maybe_create_podcast_scaffold(notebook_context: dict[str, str] | None) -> N
     if not notebook_id:
         logger.warning("팟캐스트 스캐폴드 생략: notebook_id 없음")
         return
-
     try:
         with _create_notebook_client() as client:
             result = client.create_audio_overview(
                 notebook_id=notebook_id,
-                language=settings.PHASE2_REPORT_LANGUAGE if settings.PHASE2_REPORT_LANGUAGE else "ko",
+                language=settings.PHASE2_REPORT_LANGUAGE or "ko",
                 focus_prompt="UAE resident safety daily audio briefing",
             )
             logger.info(
@@ -438,25 +489,21 @@ def _persist_storage(
     if not settings.STORAGE_ENABLED:
         return
 
-    run_payload = build_run_payload(
-        analysis=analysis,
-        notebook_url=notebook_url,
-        articles=articles,
-        flags=flags,
-    )
+    storage_root = _storage_root()
+    sqlite_db_path = _resolve_storage_path(settings.STORAGE_DB_PATH)
+    sqlite_schema_path = _resolve_storage_path(settings.STORAGE_SCHEMA_PATH)
+
+    run_payload = build_run_payload(analysis=analysis, notebook_url=notebook_url, articles=articles, flags=flags)
     article_rows = build_article_rows(articles=articles, run_ts=run_payload["run_ts"])
+
     outbox_rows: list[dict] = []
     if settings.OUTBOX_MIRROR_ENABLED and report_text.strip():
-        outbox_rows = build_outbox_rows(
-            report_text=report_text,
-            created_ts=run_payload["run_ts"],
-            include_whatsapp=True,
-        )
+        outbox_rows = build_outbox_rows(report_text=report_text, created_ts=run_payload["run_ts"], include_whatsapp=True)
 
-    persist_result = persist_run(
-        _storage_root(),
-        _resolve_storage_path(settings.STORAGE_DB_PATH),
-        _resolve_storage_path(settings.STORAGE_SCHEMA_PATH),
+    persist_result = persist_run_backend(
+        storage_root,
+        sqlite_db_path,
+        sqlite_schema_path,
         run=run_payload,
         articles=article_rows,
         outbox_msgs=outbox_rows,
@@ -482,10 +529,12 @@ async def hourly_job() -> None:
             logger.warning("UAE 미디어 스크랩 실패", error=str(uae_articles))
             uae_articles = []
             flags.append("SCRAPE_DEGRADED")
+
         if isinstance(social_articles, Exception):
             logger.warning("소셜미디어 스크랩 실패", error=str(social_articles))
             social_articles = []
             flags.append("SCRAPE_DEGRADED")
+
         if isinstance(rss_articles, Exception):
             logger.warning("RSS 스크랩 실패", error=str(rss_articles))
             rss_articles = []
@@ -494,24 +543,19 @@ async def hourly_job() -> None:
         all_articles = list(uae_articles) + list(social_articles) + list(rss_articles)
         logger.info("기사 수집 완료", total=len(all_articles))
 
-        new_articles = _filter_new(all_articles)
+        new_articles = _filter_new_persistent(all_articles)
         logger.info("신규 기사 필터링 완료", new_count=len(new_articles))
 
         if not new_articles:
             analysis = _fallback_analysis([])
             flags.append("NO_NEW_ARTICLES")
-            _persist_storage(
-                analysis=analysis,
-                articles=[],
-                report_text="",
-                notebook_url=None,
-                flags=flags,
-            )
+            _persist_storage(analysis=analysis, articles=[], report_text="", notebook_url=None, flags=flags)
             _write_health_state("ok", last_success_at=datetime.now().isoformat(), last_article_count=0)
             logger.info("새로운 소식 없음, 보고 전송 생략")
             return
 
         loop = asyncio.get_event_loop()
+
         notebook_context = await loop.run_in_executor(None, _upload_to_notebooklm, new_articles)
         if not notebook_context:
             flags.append("NOTEBOOK_UPLOAD_FAILED")
@@ -520,9 +564,7 @@ async def hourly_job() -> None:
         notebook_url = (notebook_context or {}).get("notebook_url")
 
         if should_send_immediate_alert(analysis, settings.PHASE2_ALERT_LEVELS):
-            alert_ok = await send_telegram_alert(
-                _build_immediate_alert_message(analysis, notebook_url=notebook_url)
-            )
+            alert_ok = await send_telegram_alert(_build_immediate_alert_message(analysis, notebook_url=notebook_url))
             if not alert_ok:
                 flags.append("ALERT_SEND_FAILED")
 
@@ -541,17 +583,15 @@ async def hourly_job() -> None:
             notebook_url=notebook_url,
             flags=flags,
         )
-        _write_health_state(
-            "ok",
-            last_success_at=datetime.now().isoformat(),
-            last_article_count=len(new_articles),
-        )
+
+        _write_health_state("ok", last_success_at=datetime.now().isoformat(), last_article_count=len(new_articles))
         logger.info(
             "보고 완료",
             threat_level=analysis["threat_level"],
             analysis_source=analysis["analysis_source"],
             flags=sorted(set(flags)),
         )
+
     except Exception as exc:
         logger.exception("파이프라인 실패")
         _write_health_state("error", last_error=str(exc))
@@ -563,12 +603,15 @@ async def main() -> None:
     import sys
 
     _log_runtime_paths()
+
+    # Ensure chromium deps (local long-run mode)
     subprocess.run(
         [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
         capture_output=True,
     )
 
     logger.info("이란-UAE 모니터링 시스템 시작 (canonical)", canonical_root=str(CANONICAL_ROOT))
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(hourly_job, "interval", hours=1, next_run_time=datetime.now())
     scheduler.start()

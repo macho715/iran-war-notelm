@@ -25,6 +25,9 @@ dev = [
   "pytest",
   "pytest-asyncio",
 ]
+cloud = [
+  "psycopg[binary]>=3.1.18",
+]
 
 [project.scripts]
 iran-monitor = "iran_monitor.app:run"

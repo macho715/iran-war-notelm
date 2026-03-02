@@ -1,12 +1,23 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
 
 
 class Settings(BaseSettings):
+    """Runtime settings (env-first).
+
+    Notes
+    - Base defaults keep local SQLite mode working out-of-the-box.
+    - Phase 4 (cloud) switches to Postgres when DATABASE_URL is set.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore")
+
     # Telegram
     TELEGRAM_BOT_TOKEN: str = "your_bot_token_here"
     TELEGRAM_CHAT_ID: str = "your_chat_id_here"
@@ -15,6 +26,7 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = "your_twilio_account_sid"
     TWILIO_AUTH_TOKEN: str = "your_twilio_auth_token"
     TWILIO_WHATSAPP_FROM: str = "+14155238886"
+    # Comma separated: +9715xxxxxxx,+9715yyyyyyy
     WHATSAPP_RECIPIENTS: str = ""
 
     # General
@@ -42,6 +54,19 @@ class Settings(BaseSettings):
     STORAGE_ROOT: str = "."
     STORAGE_DB_PATH: str = "db/iran_monitor.sqlite"
     STORAGE_SCHEMA_PATH: str = "src/iran_monitor/schema.sql"
+
+    # Phase 4: Postgres backend (SSOT for dashboard)
+    # - If DATABASE_URL is present, backend auto switches to 'postgres' unless forced to 'sqlite'.
+    # - Supported values: sqlite | postgres
+    STORAGE_BACKEND: str = "sqlite"
+    DATABASE_URL: str = ""
+    STORAGE_PG_SCHEMA_PATH: str = "src/iran_monitor/schema_pg.sql"
+
+    # Deduplication across restarts (cloud 필수)
+    # - When True, prefer DB check (articles table) for "already seen" filtering.
+    DEDUP_USE_DB: bool = True
+
+    # Outbox mirror (log)
     OUTBOX_MIRROR_ENABLED: bool = True
     STORAGE_NOTEBOOK_ROTATION_CAP: int = 48
 
