@@ -158,8 +158,12 @@ async def _send_telegram_report_compat(
     notebook_url: str | None = None,
     approval_required: bool = False,
 ) -> dict[str, bool]:
+    sender = _send_telegram_report_impl
+    if sender is _send_telegram_report_compat or sender is send_telegram_report:
+        sender = _canonical_reporter.send_telegram_report
+
     return await _invoke_report_sender(
-        _send_telegram_report_impl,
+        sender,
         articles,
         analysis=analysis,
         notebook_url=notebook_url,
@@ -178,7 +182,11 @@ def _bind_testable_hooks() -> None:
     _app._write_health_state = globals_map["_write_health_state"]
     _app.send_telegram_alert = globals_map["send_telegram_alert"]
     global _send_telegram_report_impl
-    _send_telegram_report_impl = globals_map["send_telegram_report"]
+    candidate_impl = globals_map["send_telegram_report"]
+    if candidate_impl is _send_telegram_report_compat:
+        _send_telegram_report_impl = _canonical_reporter.send_telegram_report
+    else:
+        _send_telegram_report_impl = candidate_impl
     _app.send_telegram_report = _send_telegram_report_compat
 
 
