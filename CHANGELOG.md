@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## [2.0.3] - 2026-03-02
+
+### Changed
+
+- Canonical repository operation is fixed to `macho715/iran-war-notelm`.
+- README quick-start commands and canonical path examples now reference `iran-war-notelm`.
+- Legacy repository references to `iran-war-uae-monitor` are retained only as historical context.
+
 ## [2.0.2] - 2026-03-01
 
 ### Added

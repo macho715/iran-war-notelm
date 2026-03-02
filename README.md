@@ -11,7 +11,7 @@
 - 실제 운영/개발/테스트 canonical 경로는 아래입니다.
 
 ```text
-C:\Users\jichu\Downloads\iran-war-notelm-main\iran-war-uae-monitor
+C:\Users\jichu\Downloads\iran-war-notelm-main
 ```
 
 - 루트 `python main.py` 실행 시 canonical 프로젝트로 자동 위임됩니다.
@@ -20,7 +20,7 @@ C:\Users\jichu\Downloads\iran-war-notelm-main\iran-war-uae-monitor
 
 ## ✅ v1.6 통합 운영 기준
 
-- Canonical 실행 경로: `C:\Users\jichu\Downloads\iran-war-notelm-main\iran-war-uae-monitor`
+- Canonical 실행 경로: `C:\Users\jichu\Downloads\iran-war-notelm-main`
 - Phase 1 + Phase 2가 루트 프로젝트에 통합됨 (RSS/Health + AI 분석/즉시 경보)
 - Option A(JSON 아카이브): `reports/{YYYY-MM-DD}/{HH-MM}.json` 저장
 - 중첩 폴더 `iran-war-notelm-main\iran-war-notelm-main`는 실행 대상 아님
@@ -89,8 +89,8 @@ flowchart TD
 ### 1. 설치
 
 ```bash
-git clone https://github.com/your-org/iran-war-uae-monitor
-cd iran-war-uae-monitor
+git clone https://github.com/macho715/iran-war-notelm
+cd iran-war-notelm
 pip install -r requirements.txt
 playwright install chromium
 ```
@@ -144,7 +144,7 @@ python -m pytest -q   # 전체 테스트
 
 ```mermaid
 graph TD
-    Root["📁 iran-war-uae-monitor/"]
+    Root["📁 iran-war-notelm/"]
     Root --> Main["📄 main.py\n파이프라인 + 스케줄러"]
     Root --> Reporter["📄 reporter.py\nTelegram + WhatsApp"]
     Root --> Health["📄 health.py\n헬스 상태 API"]
