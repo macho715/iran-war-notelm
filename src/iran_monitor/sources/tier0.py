@@ -22,10 +22,13 @@ TIER0_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier0_kr_mofa_0404",
         name="KR MOFA 0404",
-        url="https://www.0404.go.kr/dev/main.mofa",
+        # old URL https://www.0404.go.kr/dev/main.mofa returns 404 (URL structure changed)
+        # overseas.mofa.go.kr is the MOFA overseas portal with travel advisory content
+        url="https://overseas.mofa.go.kr/eng-en/index.do",
         tier="TIER0",
         indicator_ids=("I01", "I07"),
-        keywords=("여행경보", "특별여행주의보", "철수권고", "즉시 출국", "leave immediately"),
+        keywords=("여행경보", "특별여행주의보", "철수권고", "즉시 출국", "leave immediately",
+                  "travel advisory", "safety", "security", "alert"),
         critical_keywords=("즉시 출국", "철수권고", "leave immediately"),
         tags=("kr_channel",),
         interval_min=15,

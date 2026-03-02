@@ -34,10 +34,12 @@ TIER1_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier1_reuters_world",
         name="Reuters World",
-        url="https://www.reuters.com/world/middle-east/",
+        # reuters.com returns 401 (subscription) and feeds.reuters.com DNS fails in some VMs
+        # Google News RSS searches for Reuters content — publicly accessible, high quality
+        url="https://news.google.com/rss/search?q=reuters+iran+uae+attack&hl=en-AE&gl=AE&ceid=AE:en",
         tier="TIER1",
         indicator_ids=("I03",),
-        keywords=("iran", "uae", "missile", "drone", "attack", "gulf", *ALERT_KEYWORDS),
+        keywords=("iran", "uae", "missile", "drone", "attack", "gulf", "reuters", *ALERT_KEYWORDS),
         critical_keywords=("missile", "drone", "attack", "uae attack", "iran strike"),
         tags=("strike",),
         interval_min=15,
@@ -125,11 +127,14 @@ TIER1_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier1_downdetector_uae",
         name="Downdetector UAE",
-        url="https://downdetector.ae/",
+        # downdetector.ae returns 403 (Cloudflare JS challenge — cannot bypass with httpx)
+        # UAE TDRA (Telecom Regulatory Authority) is the official authority for comms incidents
+        url="https://www.tdra.gov.ae/en/the-authority",
         tier="TIER1",
         indicator_ids=("I05",),
-        keywords=("outage", "issues", "internet", "etisalat", "du", "down"),
-        critical_keywords=("outage", "major outage", "service down"),
+        keywords=("outage", "disruption", "internet", "network", "incident",
+                  "telecom", "service", "down", "etisalat", "du"),
+        critical_keywords=("outage", "major outage", "service disruption"),
         tags=("comms",),
         interval_min=15,
         priority="critical",
@@ -177,10 +182,13 @@ TIER1_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier1_azure_status",
         name="Azure Status",
-        url="https://azure.status.microsoft.com/en-us/status",
+        # azure.status.microsoft.com fails DNS resolution in some VM environments
+        # CDN feed URL resolves reliably and provides the same status data as RSS
+        url="https://azurestatuscdn.azureedge.net/en-us/status/feed/",
         tier="TIER1",
         indicator_ids=("I05",),
-        keywords=("degraded", "outage", "service issue", "incident", "middle east"),
+        keywords=("degraded", "outage", "service issue", "incident", "middle east",
+                  "disruption", "impact", "uae", "impacted"),
         critical_keywords=("degraded", "outage", "incident"),
         tags=("comms",),
         interval_min=15,
@@ -213,11 +221,13 @@ TIER1_SPECS: list[SourceSpec] = [
     ),
     SourceSpec(
         source_id="tier1_manila_times",
-        name="The Manila Times",
-        url="https://www.manilatimes.net/",
+        name="Rappler Philippines",
+        # manilatimes.net returns 403 (Cloudflare JS challenge — httpx cannot solve)
+        # Rappler is a major PH news outlet covering Middle East & OFW repatriation
+        url="https://www.rappler.com/world/middle-east/",
         tier="TIER1",
         indicator_ids=("I07",),
-        keywords=("evacuation", "middle east", "uae", "repatriation"),
+        keywords=("evacuation", "middle east", "uae", "repatriation", "ofw", "ofws", "philippine"),
         critical_keywords=("evacuation", "repatriation"),
         interval_min=30,
         priority="medium",
