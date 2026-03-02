@@ -1,14 +1,7 @@
 # Layout (Canonical)
 
 ```text
-iran-war-uae-monitor/
-  scripts/
-    run_monitor.py
-    run_now.py
-    check_runtime_paths.py
-    init_storage.py
-    demo_hourly_job.py
-    query_db.py
+iran-war-notelm-main/
   src/
     iran_monitor/
       app.py
@@ -18,12 +11,27 @@ iran-war-uae-monitor/
       health.py
       storage.py
       storage_adapter.py
+      storage_backend.py
       schema.sql
+      schema_pg.sql
       scrapers/
         __init__.py
         uae_media.py
         social_media.py
         rss_feed.py
+
+  scripts/
+    check_runtime_paths.py
+    cleanup_duplicate_monitors.ps1
+    run_now.py
+    run_monitor.py
+    run_scrape.py
+
+  dashboard/
+    app/
+    public/
+    src/...
+
   tests/
     test_phase2_ai.py
     test_reporter_phase2.py
@@ -34,11 +42,30 @@ iran-war-uae-monitor/
     test_storage_adapter.py
     test_storage_integration.py
     test_legacy_wrapper.py
+
   docs/
     ARCHITECTURE.md
-    LAYOUT.md
     CHANGELOG.md
-  pyproject.toml
-  pytest.ini
+    LAYOUT.md
+
+  .github/workflows/
+    monitor.yml
+  .agent/
+  reports/
+  db/
+  state/
+  outbox/
+  ledger/
+  exports/
+    notebooklm/
+
+  main.py
+  reporter.py
+  health.py
+  phase2_ai.py
+  config.py
+  requirements.txt
   README.md
+  UPGRADE_GRAND_PLAN.md
+  VERCEL.MD
 ```

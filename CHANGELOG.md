@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## [2.0.5] - 2026-03-03
+
+### Updated
+
+- 문서 기준을 운영 현황과 완전 정합:
+  - `README.md`에 Phase 4(러너→Postgres→Vercel), canonical 경로 고정, 2회 연속 실행 중복 억제 동작을 운영 체크리스트에 반영.
+  - `docs/ARCHITECTURE.md`와 `LAYOUT.md`에서 현재 `src/iran_monitor` 단일 런타임/저장 구조를 기준으로 정리.
+- 연속 실행 검증 결과 반영:
+  - 신규 기사 유입(run1 `new_count=2`) 후 즉시 동일 사이클(run2)에서 `new_count=0`으로 DB 기반 dedup+in-process dedup가 정상 동작.
+  - `outbox`는 1회차 2건(telegram/whatsapp)만 적재되고 2회차 추가 적재 없음 확인.
+- 현재 운영 상태 반영:
+  - `main.py`는 canonical 런타임 위임 + 경로 진단 체크를 유지.
+  - 단일 인스턴스 락 정책은 계속 유지되며, `SINGLE_INSTANCE_GUARD_ENABLED` 기본값은 true.
+
+## [2.0.4] - 2026-03-02
+
+### Updated
+
+- Documented Phase 4 control-plane state:
+  - `README.md` now includes Phase 4 runner → Postgres → Vercel verification workflow.
+  - `VERCEL.MD` rewritten to reflect deployed architecture and 운영 체크리스트.
+  - `UPGRADE_GRAND_PLAN.md` V2 기준으로 경로/배포/Phase4 체크 상태를 동기화.
+  - `ARCHITECTURE.md` and `docs/ARCHITECTURE.md` updated with DB dedup + dashboard read-path notes.
+- `main.py`/monitor entry docs now explicitly include execution path guard and monitor runner command for consistency.
+
 ## [2.0.3] - 2026-03-02
 
 ### Changed
