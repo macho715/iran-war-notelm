@@ -1,4 +1,4 @@
-import { fetchArticles, fetchOutbox, fetchRuns } from "../lib/queries";
+import { fetchArticlesSafe, fetchOutboxSafe, fetchRunsSafe } from "../lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +13,30 @@ function badge(level: string) {
 }
 
 export default async function Page() {
-  const [runs, articles, outbox] = await Promise.all([fetchRuns(24), fetchArticles(10), fetchOutbox(10)]);
+  const [runsResult, articlesResult, outboxResult] = await Promise.all([
+    fetchRunsSafe(24),
+    fetchArticlesSafe(10),
+    fetchOutboxSafe(10)
+  ]);
+  const runs = runsResult.rows;
+  const articles = articlesResult.rows;
+  const outbox = outboxResult.rows;
   const latest = runs[0];
+  const dbError = runsResult.error ?? articlesResult.error ?? outboxResult.error;
 
   return (
     <>
       <h1>Overview</h1>
+
+      {dbError ? (
+        <section style={{ padding: 12, border: "1px solid #fca5a5", borderRadius: 8, background: "#fff1f2", marginBottom: 12 }}>
+          <b>DB 조회 실패</b>
+          <div style={{ marginTop: 4 }}>
+            <code>{dbError}</code>
+          </div>
+          <div style={{ marginTop: 4 }}>DATABASE_URL / 테이블 스키마 / 네트워크 상태를 확인하세요.</div>
+        </section>
+      ) : null}
 
       {!latest ? (
         <p>runs 데이터가 없습니다. (DATABASE_URL / 스키마 / GitHub Actions 실행 여부 확인)</p>
