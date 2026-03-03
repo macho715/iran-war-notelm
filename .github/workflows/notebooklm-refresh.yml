@@ -18,6 +18,9 @@ on:
       source_id:
         description: "Optional source id"
         required: false
+      notebook_id:
+        description: "Optional notebook id for on-demand regeneration"
+        required: false
       use_mcp:
         description: "Use MCP/ai mode for notebooklm_on_demand"
         required: false
@@ -66,6 +69,7 @@ jobs:
           ACTION="${{ github.event.inputs.action }}"
           RUN_ID="${{ github.event.inputs.run_id }}"
           SOURCE_ID="${{ github.event.inputs.source_id }}"
+          NOTEBOOK_ID="${{ github.event.inputs.notebook_id }}"
           USE_MCP="${{ github.event.inputs.use_mcp }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
@@ -75,6 +79,9 @@ jobs:
           fi
           if [ -n "$SOURCE_ID" ]; then
             CMD+=(--source-id "$SOURCE_ID")
+          fi
+          if [ -n "$NOTEBOOK_ID" ]; then
+            CMD+=(--notebook-id "$NOTEBOOK_ID")
           fi
           if [ "$USE_MCP" = "true" ]; then
             CMD+=(--use-mcp)

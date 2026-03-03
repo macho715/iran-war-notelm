@@ -156,6 +156,22 @@ function notebooklmScriptPath(): string {
   return path.join(base, "scripts", "notebooklm_on_demand.py");
 }
 
+function extractNotebookId(notebookUrl: string | null | undefined): string | null {
+  if (!notebookUrl) {
+    return null;
+  }
+  const raw = notebookUrl.trim();
+  if (!raw) {
+    return null;
+  }
+  const marker = "/notebook/";
+  if (raw.includes(marker)) {
+    const tail = raw.split(marker, 2)[1];
+    return tail?.split("?")[0]?.trim() || null;
+  }
+  return raw;
+}
+
 function getWorkflowName(): string {
   return process.env.NOTEBOOKLM_REFRESH_WORKFLOW || "notebooklm-refresh.yml";
 }
@@ -164,6 +180,7 @@ async function dispatchWorkflow(
   action: RefreshRequest["action"],
   runId: string,
   sourceId: string | undefined,
+  notebookId: string | null,
   useMcp: boolean,
   dryRun: boolean,
 ): Promise<Record<string, unknown>> {
@@ -187,6 +204,9 @@ async function dispatchWorkflow(
   };
   if (sourceId) {
     inputs.source_id = sourceId;
+  }
+  if (notebookId) {
+    inputs.notebook_id = notebookId;
   }
 
   const response = await fetch(
@@ -258,6 +278,7 @@ export async function POST(req: NextRequest) {
   const useMcp = parseBool(body.use_mcp, false);
   const dryRun = parseBool(body.dry_run, false);
   const runId = requestedRun.run_id;
+  const notebookId = extractNotebookId(requestedRun.notebook_url);
 
   const script = notebooklmScriptPath();
   const shouldRunLocal = existsSync(script) && process.env.NOTEBOOKLM_FORCE_WORKFLOW !== "1" && !process.env.VERCEL;
@@ -272,6 +293,9 @@ export async function POST(req: NextRequest) {
 
   if (body.source_id) {
     args.push("--source-id", body.source_id);
+  }
+  if (notebookId) {
+    args.push("--notebook-id", notebookId);
   }
   if (useMcp) {
     args.push("--use-mcp");
@@ -317,7 +341,7 @@ export async function POST(req: NextRequest) {
       const msg = errMessage(err);
       if (msg.includes("Python 실행기를 찾을 수 없습니다") || msg.includes("python 실행기")) {
         // fallback to workflow dispatch in constrained envs
-        const workflow = await dispatchWorkflow(body.action, runId, body.source_id, useMcp, dryRun);
+        const workflow = await dispatchWorkflow(body.action, runId, body.source_id, notebookId, useMcp, dryRun);
         const outboxMsgId = await createRefreshOutbox(runId, body.action, body.source_id, workflow);
         const outboxCount = await countOutboxByRunId(runId);
         return success({
@@ -336,7 +360,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const workflow = await dispatchWorkflow(body.action, runId, body.source_id, useMcp, dryRun);
+    const workflow = await dispatchWorkflow(body.action, runId, body.source_id, notebookId, useMcp, dryRun);
     const outboxMsgId = await createRefreshOutbox(runId, body.action, body.source_id, workflow);
     const outboxCount = await countOutboxByRunId(runId);
     return success({
