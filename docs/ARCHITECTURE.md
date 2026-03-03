@@ -9,6 +9,7 @@
   + `.notebooklm_id`, `.health_state.json`, `state/seen_articles.json`, `ledger/`
 - 중복제거: in-process `_seen_hashes`와 DB(`articles.canonical_url`) 이중 dedup
 - 실행 진입: `main.py`(compat wrapper) → `scripts/run_monitor.py` → `src/iran_monitor.app.run()`
+- **NotebookLM 경로:** CI(GHA)에서는 Python API만 사용한다. MCP는 로컬/에이전트 전용이며, Runbook·온디맨드 스크립트에서만 사용한다. 설정은 [docs/CURSOR_MCP_SETUP.md](CURSOR_MCP_SETUP.md) 참고.
 
 ## 2.0 운영 강화 포인트
 
@@ -217,3 +218,11 @@ graph TD
     style VPN fill:#f39c12,color:#fff
     style TW fill:#009900,color:#fff
 ```
+## MCP/온디맨드 운영 보조선
+
+- CI/GHA 운영 파이프라인은 Python API(`src/iran_monitor` + `notebooklm_tools`)만 사용.
+- 로컬/에이전트 보조: `scripts/notebooklm_on_demand.py`의 MCP/CLI 온디맨드 재생성 경로.
+- 대시보드 보조 API(옵션): `POST /api/notebooklm/refresh`
+  - run_id 기준으로 요약 재생성 요청(보고서/팟캐스트/슬라이드).
+  - 실패는 `ok=false`, `error_code`, `message`로 반환.
+  - 기존 스케줄러/실시간 알림/저장 파이프라인은 변경 없음.

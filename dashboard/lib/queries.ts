@@ -9,6 +9,7 @@ export type RunRow = {
   summary_ad: string | null;
   summary_dxb: string | null;
   notebook_url: string | null;
+  source_id: string | null;
 };
 
 export type ArticleRow = {
@@ -59,7 +60,7 @@ async function queryRowsSafe<T>(label: string, queryFn: () => Promise<T[]>): Pro
 export async function fetchRuns(limit = 24): Promise<RunRow[]> {
   const pool = getPool();
   const { rows } = await pool.query<RunRow>(
-    `SELECT run_id, run_ts, threat_level, score, sentiment, summary_ad, summary_dxb, notebook_url
+    `SELECT run_id, run_ts, threat_level, score, sentiment, summary_ad, summary_dxb, notebook_url, NULL::text AS source_id
      FROM runs
      ORDER BY run_ts DESC
      LIMIT $1`,
@@ -70,6 +71,22 @@ export async function fetchRuns(limit = 24): Promise<RunRow[]> {
 
 export async function fetchRunsSafe(limit = 24): Promise<SafeRowsResult<RunRow>> {
   return queryRowsSafe("runs", () => fetchRuns(limit));
+}
+
+export async function fetchRun(runId: string): Promise<RunRow | null> {
+  const pool = getPool();
+  const { rows } = await pool.query<RunRow>(
+    `SELECT run_id, run_ts, threat_level, score, sentiment, summary_ad, summary_dxb, notebook_url, NULL::text AS source_id
+     FROM runs
+     WHERE run_id = $1`,
+    [runId]
+  );
+  return rows[0] ?? null;
+}
+
+export async function fetchLatestRun(): Promise<RunRow | null> {
+  const rows = await fetchRuns(1);
+  return rows[0] ?? null;
 }
 
 export async function fetchArticles(limit = 50): Promise<ArticleRow[]> {
@@ -113,6 +130,17 @@ export async function fetchOutboxMsg(msgId: string): Promise<OutboxRow | null> {
     [msgId]
   );
   return rows[0] ?? null;
+}
+
+export async function countOutboxByRunId(runId: string): Promise<number> {
+  const pool = getPool();
+  const { rows } = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM outbox
+     WHERE run_id = $1`,
+    [runId]
+  );
+  return Number.parseInt(rows[0]?.count ?? "0", 10);
 }
 
 export async function updateOutboxStatus(
