@@ -13,6 +13,7 @@ import json
 import subprocess
 import os
 import sys
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ from config import settings  # noqa: E402
 from src.iran_monitor import app as _app
 from src.iran_monitor import reporter as _canonical_reporter
 from src.iran_monitor.reporter import send_telegram_alert
+
+_LOGGER = logging.getLogger(__name__)
 
 # Re-exported compatibility symbols (can be monkeypatched by tests)
 scrape_uae_media = _app.scrape_uae_media
@@ -86,7 +89,8 @@ def _get_runtime_paths() -> dict[str, str]:
 def _accepts_approval_kw(fn: object) -> bool:
     try:
         sig = inspect.signature(fn)
-    except (TypeError, ValueError):
+    except Exception:
+        _LOGGER.exception("지원 함수 시그니처 검사 실패: approval_required 전달 경로 비활성 fallback")
         return False
 
     params = sig.parameters.values()
@@ -125,15 +129,24 @@ async def _invoke_report_sender(
     if sender is None:
         return {"telegram": False, "whatsapp": False, "approved": False}
 
-    if _accepts_approval_kw(sender):
-        result = sender(articles, analysis=analysis, notebook_url=notebook_url, approval_required=approval_required)
-    else:
-        result = sender(articles, analysis=analysis, notebook_url=notebook_url)
+    try:
+        if _accepts_approval_kw(sender):
+            result = sender(
+                articles,
+                analysis=analysis,
+                notebook_url=notebook_url,
+                approval_required=approval_required,
+            )
+        else:
+            result = sender(articles, analysis=analysis, notebook_url=notebook_url)
 
-    if asyncio.iscoroutine(result):
-        result = await result
+        if asyncio.iscoroutine(result):
+            result = await result
 
-    return _resolve_report_status(result)
+        return _resolve_report_status(result)
+    except Exception:
+        _LOGGER.exception("리포트 전송자 실행 실패: 경고 플래그로 처리")
+        return {"telegram": False, "whatsapp": False, "approved": True}
 
 
 async def send_telegram_report(
@@ -152,18 +165,19 @@ async def send_telegram_report(
     )
 
 
-async def _send_telegram_report_compat(
+# Canonical root wrapper identity for monkeypatch-safe resolution in tests/compat path.
+_DEFAULT_ROOT_SEND_TELEGRAM_REPORT = send_telegram_report
+
+
+async def _send_telegram_report_bridge(
     articles: list[dict],
     analysis: dict | None = None,
     notebook_url: str | None = None,
     approval_required: bool = False,
 ) -> dict[str, bool]:
-    sender = _send_telegram_report_impl
-    if sender is _send_telegram_report_compat:
-        sender = _canonical_reporter.send_telegram_report
-
+    """Canonical bridge used by app runtime after hook binding."""
     return await _invoke_report_sender(
-        sender,
+        _send_telegram_report_impl,
         articles,
         analysis=analysis,
         notebook_url=notebook_url,
@@ -183,11 +197,14 @@ def _bind_testable_hooks() -> None:
     _app.send_telegram_alert = globals_map["send_telegram_alert"]
     global _send_telegram_report_impl
     candidate_impl = globals_map["send_telegram_report"]
-    if candidate_impl is _send_telegram_report_compat:
+    if candidate_impl in (
+        _send_telegram_report_bridge,
+        _DEFAULT_ROOT_SEND_TELEGRAM_REPORT,
+    ):
         _send_telegram_report_impl = _canonical_reporter.send_telegram_report
     else:
         _send_telegram_report_impl = candidate_impl
-    _app.send_telegram_report = _send_telegram_report_compat
+    _app.send_telegram_report = _send_telegram_report_bridge
 
 
 # Compatibility symbol for legacy imports
