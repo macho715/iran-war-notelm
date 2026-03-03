@@ -3,7 +3,7 @@ name: Iran-UAE Monitor (hourly)
 on:
   schedule:
     # GitHub Actions schedule runs in UTC. Avoid 00 minute to reduce queue contention.
-    - cron: '7 * * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch: {}
 
 jobs:

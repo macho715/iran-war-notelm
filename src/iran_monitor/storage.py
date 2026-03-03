@@ -54,6 +54,7 @@ def ensure_layout(root: Path) -> None:
     (root / "outbox").mkdir(parents=True, exist_ok=True)
     (root / "ledger").mkdir(parents=True, exist_ok=True)
     (root / "exports" / "notebooklm").mkdir(parents=True, exist_ok=True)
+    (root / "urgentdash_snapshots").mkdir(parents=True, exist_ok=True)
 
 
 def connect_sqlite(db_path: Path) -> sqlite3.Connection:

@@ -89,6 +89,16 @@ class Settings(BaseSettings):
     SINGLE_INSTANCE_GUARD_ENABLED: bool = True
     SINGLE_INSTANCE_LOCK_FILE: str = "state/monitor.lock"
 
+    # HyIE-ERC2 real-time state
+    HYIE_ENABLED: bool = True
+    HYIE_STATE_FILE: str = "state/hyie_state.json"
+    HYIE_SOURCE_TIMEOUT_SEC: int = 8
+    HYIE_APPEND_REPORTS_JSONL: bool = True
+    HYIE_APPEND_URGENTDASH_JSONL: bool = True
+    HYIE_EGRESS_ETA_FILE: str = "state/egress_eta.json"
+    HYIE_INGEST_LOCK_FILE: str = "state/hyie_ingest.lock"
+    HYIE_STATE_META_FILE: str = "state/hyie_state.meta.json"
+
     def resolve_path(self, value: str) -> Path:
         return (Path(self.STORAGE_ROOT) / value).resolve()
 
