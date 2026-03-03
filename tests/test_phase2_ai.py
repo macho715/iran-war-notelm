@@ -1,4 +1,5 @@
 import pytest
+import json
 
 from phase2_ai import (
     analyze_with_notebooklm_or_fallback,
@@ -38,6 +39,33 @@ def test_extract_json_payload_fenced_json():
     payload = extract_json_payload(text)
     assert payload["threat_level"] == "MEDIUM"
     assert payload["threat_score"] == 58
+
+
+def test_extract_json_payload_fenced_nested_json_stress():
+    nested = {"level": 1}
+    for i in range(100):
+        nested = {"depth": i, "node": nested}
+    nested["threat_level"] = "HIGH"
+    nested["threat_score"] = 77
+    nested["sentiment"] = "일반"
+    nested["abu_dhabi_level"] = "MEDIUM"
+    nested["dubai_level"] = "LOW"
+    nested["summary"] = "nested nested stress test"
+    nested["recommended_action"] = "감시 강화"
+    nested["key_points"] = ["a", "b", "c"]
+    text = "```json\n" + json.dumps(nested, ensure_ascii=False) + "\n```"
+    payload = extract_json_payload(text)
+    assert payload["threat_level"] == "HIGH"
+    assert payload["threat_score"] == 77
+
+
+def test_extract_json_payload_without_fence_chooses_valid_braced_object():
+    payload = {"threat_level": "LOW", "threat_score": 12, "key_points": ["a"], "summary": "", "recommended_action": "", "abu_dhabi_level": "LOW", "dubai_level": "LOW", "sentiment": "일반"}
+    raw_json = json.dumps(payload, ensure_ascii=False)
+    text = f"noise {raw_json} trailing text"
+    result = extract_json_payload(text)
+    assert result["threat_level"] == "LOW"
+    assert result["threat_score"] == 12
 
 
 def test_invalid_json_switches_to_fallback():
@@ -84,4 +112,3 @@ def test_fallback_sentiment_and_city_levels():
     ]
     normal = fallback_analyze(normal_articles)
     assert normal["sentiment"] == "일반"
-

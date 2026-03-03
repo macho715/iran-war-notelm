@@ -15,15 +15,20 @@ async def scrape_social_media():
     logger.info("Starting Social Media public scrape")
     results = []
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=settings.HEADLESS)
-        # Using a fresh context to avoid login prompts
-        context = await browser.new_context()
-        page = await context.new_page()
-        
+        browser = None
         try:
+            browser = await p.chromium.launch(headless=settings.HEADLESS)
+            # Using a fresh context to avoid login prompts
+            context = await browser.new_context()
+            page = await context.new_page()
+        # Using a fresh context to avoid login prompts
             # Facebook Public Search (Extremely basic example)
             logger.info("Scraping Facebook Public Search")
-            await page.goto("https://www.facebook.com/public/iran-attack-uae-abu-dhabi", wait_until="networkidle", timeout=20000)
+            await page.goto(
+                "https://www.facebook.com/public/iran-attack-uae-abu-dhabi",
+                wait_until=settings.SCRAPER_WAIT_UNTIL,
+                timeout=settings.SCRAPER_TIMEOUT_MS,
+            )
             # Find public posts (this is highly dependent on FB's DOM which changes often)
             # Very basic fallback implementation
             posts = await page.query_selector_all("a[role='link']") 
@@ -36,7 +41,11 @@ async def scrape_social_media():
 
             # Instagram Public Tag Search (Also basic example)
             logger.info("Scraping Instagram Public Search")
-            await page.goto("https://www.instagram.com/explore/tags/abudhabiairport/", wait_until="networkidle", timeout=20000)
+            await page.goto(
+                "https://www.instagram.com/explore/tags/abudhabiairport/",
+                wait_until=settings.SCRAPER_WAIT_UNTIL,
+                timeout=settings.SCRAPER_TIMEOUT_MS,
+            )
             # Find public posts
             posts = await page.query_selector_all("a[href^='/p/']")
             for post in posts[:3]:
@@ -44,11 +53,11 @@ async def scrape_social_media():
                 if link:
                     full_link = f"https://www.instagram.com{link}"
                     results.append({"source": "Instagram", "title": f"Instagram Post: {full_link}", "link": full_link})
-                    
         except Exception as e:
             logger.warning("Error scraping social media (expected due to anti-bot measures)", error=str(e))
         finally:
-            await browser.close()
+            if browser is not None:
+                await browser.close()
             
         logger.info("Finished Social Media scrape", count=len(results))
         return results

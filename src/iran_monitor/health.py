@@ -30,10 +30,14 @@ def health():
         }
     try:
         data = json.loads(HEALTH_STATE_FILE.read_text(encoding="utf-8"))
+        last_success_at = data.get("last_success_at")
+        last_run_ts = data.get("last_run_ts", last_success_at)
         return {
             "status": data.get("status", "unknown"),
-            "last_success_at": data.get("last_success_at"),
-            "last_article_count": data.get("last_article_count"),
+            "last_success_at": last_success_at,
+            "last_run_ts": last_run_ts,
+            "last_article_count": data.get("last_article_count", data.get("counts", {}).get("new_count")),
+            "counts": data.get("counts") or {},
             "last_error": data.get("last_error"),
         }
     except Exception as e:

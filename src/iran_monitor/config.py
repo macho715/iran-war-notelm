@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     # - When True, prefer DB check (articles table) for "already seen" filtering.
     DEDUP_USE_DB: bool = True
 
+    # Scheduler observability / health alerts
+    SCHEDULER_ALERT_ENABLED: bool = False
+    HEALTH_ALERT_ENABLED: bool = False
+
+    # Scraper timeout/await defaults (shared)
+    SCRAPER_TIMEOUT_MS: int = 30000
+    SCRAPER_WAIT_UNTIL: str = "domcontentloaded"
+
     # Outbox mirror (log)
     OUTBOX_MIRROR_ENABLED: bool = True
     STORAGE_NOTEBOOK_ROTATION_CAP: int = 48

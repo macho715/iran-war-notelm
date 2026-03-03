@@ -16,12 +16,14 @@ import hashlib
 import importlib
 import json
 import os
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED, JobExecutionEvent
 from notebooklm_tools.core.auth import AuthManager
 from notebooklm_tools.core.client import NotebookLMClient
 
@@ -240,13 +242,21 @@ def _write_health_state(
     last_success_at: str | None = None,
     last_article_count: int | None = None,
     last_error: str | None = None,
+    last_run_ts: str | None = None,
+    counts: dict[str, int] | None = None,
 ) -> None:
     try:
         data = {"status": status}
         if last_success_at:
             data["last_success_at"] = last_success_at
+        if last_run_ts:
+            data["last_run_ts"] = last_run_ts
+            if "last_success_at" not in data:
+                data["last_success_at"] = last_run_ts
         if last_article_count is not None:
             data["last_article_count"] = last_article_count
+        if counts is not None:
+            data["counts"] = counts
         if last_error:
             data["last_error"] = last_error
         HEALTH_STATE_FILE.write_text(
@@ -412,6 +422,57 @@ def _log_runtime_paths() -> None:
         )
 
 
+def _scheduler_event_message(event: JobExecutionEvent) -> str:
+    event_code = event.code
+    event_type = []
+    if event_code & EVENT_JOB_ERROR:
+        event_type.append("JOB_ERROR")
+    if event_code & EVENT_JOB_MISSED:
+        event_type.append("JOB_MISSED")
+    if not event_type:
+        event_type.append(f"UNKNOWN({event_code})")
+    exception = getattr(event, "exception", None)
+    trace = getattr(event, "traceback", None)
+    if exception:
+        return (
+            f"⚠️ 스케줄러 {','.join(event_type)} 예외\n"
+            f"Job ID: {event.job_id}\n"
+            f"예외: {exception}\n"
+            f"Traceback: {trace or 'n/a'}"
+        )
+    return f"⚠️ 스케줄러 {','.join(event_type)} 발생 (예외 없음) | Job ID: {event.job_id}"
+
+
+def _on_scheduler_event(event: JobExecutionEvent) -> None:
+    event_code = event.code
+    exception = getattr(event, "exception", None)
+    tb_text = getattr(event, "traceback", None)
+    if exception and not tb_text:
+        tb_text = "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
+    logger.error(
+        "스케줄러 이벤트 발생",
+        job_id=event.job_id,
+        event_code=event_code,
+        exception=repr(exception),
+        traceback=tb_text,
+    )
+
+    if settings.SCHEDULER_ALERT_ENABLED and (event_code & (EVENT_JOB_ERROR | EVENT_JOB_MISSED)):
+        message = _scheduler_event_message(event)
+        loop = None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            loop.create_task(send_telegram_alert(message))
+        else:
+            try:
+                asyncio.run(send_telegram_alert(message))
+            except RuntimeError:
+                logger.warning("스케줄러 알림 전송 실패: 이벤트 루프 없음")
+
+
 def _fallback_analysis(articles: list[dict]) -> AnalysisResult:
     return fallback_analyze(
         articles,
@@ -564,7 +625,8 @@ async def _probe_sources() -> dict[str, Any]:
 
 async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) -> None:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    logger.info("모니터링 사이클 시작", run_at=now)
+    run_ts = datetime.now().isoformat()
+    logger.info("모니터링 사이클 시작", run_at=now, run_ts=run_ts)
     flags: list[str] = []
 
     try:
@@ -600,7 +662,13 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
             analysis = _fallback_analysis([])
             flags.append("NO_NEW_ARTICLES")
             _persist_storage(analysis=analysis, articles=[], report_text="", notebook_url=None, flags=flags)
-            _write_health_state("ok", last_success_at=datetime.now().isoformat(), last_article_count=0)
+            _write_health_state(
+                "ok",
+                last_success_at=run_ts,
+                last_article_count=0,
+                last_run_ts=run_ts,
+                counts={"new_count": 0, "total_count": 0, "unique_count": 0},
+            )
             logger.info("새로운 소식 없음, 보고 전송 생략")
             return
 
@@ -650,7 +718,17 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
             flags=flags,
         )
 
-        _write_health_state("ok", last_success_at=datetime.now().isoformat(), last_article_count=len(new_articles))
+        _write_health_state(
+            "ok",
+            last_success_at=run_ts,
+            last_article_count=len(new_articles),
+            last_run_ts=run_ts,
+            counts={
+                "new_count": len(new_articles),
+                "total_count": len(all_articles),
+                "unique_count": len(new_articles),
+            },
+        )
         logger.info(
             "보고 완료",
             threat_level=analysis["threat_level"],
@@ -660,8 +738,13 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
 
     except Exception as exc:
         logger.exception("파이프라인 실패")
-        _write_health_state("error", last_error=str(exc))
-        await send_telegram_alert(f"⚠️ Iran-UAE Monitor 파이프라인 실패\n\n{type(exc).__name__}: {exc}")
+        _write_health_state(
+            "error",
+            last_error=f"{type(exc).__name__}: {exc}",
+            last_run_ts=run_ts,
+        )
+        if settings.HEALTH_ALERT_ENABLED:
+            await send_telegram_alert(f"⚠️ Iran-UAE Monitor 파이프라인 실패\n\n{type(exc).__name__}: {exc}")
 
 
 async def main(*, approval_required: bool = False, dry_run: bool = False) -> None:
@@ -679,6 +762,7 @@ async def main(*, approval_required: bool = False, dry_run: bool = False) -> Non
     logger.info("이란-UAE 모니터링 시스템 시작 (canonical)", canonical_root=str(CANONICAL_ROOT))
 
     scheduler = AsyncIOScheduler()
+    scheduler.add_listener(_on_scheduler_event, EVENT_JOB_ERROR | EVENT_JOB_MISSED)
     scheduler.add_job(
         hourly_job,
         "interval",
