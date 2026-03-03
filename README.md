@@ -202,12 +202,29 @@ graph TD
     Docs --> Arch["📄 ARCHITECTURE.md"]
     Docs --> Layout["📄 LAYOUT.md"]
     Docs --> CL["📄 CHANGELOG.md"]
+    Docs --> Runbooks["📄 runbooks/"]
 
     style Root fill:#333,color:#fff
     style Main fill:#e74c3c,color:#fff
     style Reporter fill:#3498db,color:#fff
     style UAE fill:#2ecc71,color:#fff
 ```
+
+- **운영 Runbook:** NotebookLM MCP 사용(장애 시 요약, 인증 갱신 등)은 [docs/runbooks/NOTEBOOKLM_MCP_RUNBOOK.md](docs/runbooks/NOTEBOOKLM_MCP_RUNBOOK.md) 참고. Cursor MCP 설정은 [docs/CURSOR_MCP_SETUP.md](docs/CURSOR_MCP_SETUP.md) 참고.
+- **NotebookLM 사용 시:** 기여·개발 시 MCP 설정을 쓰려면 [docs/CURSOR_MCP_SETUP.md](docs/CURSOR_MCP_SETUP.md)를 참고한다. CI(GHA)에서는 Python API만 사용하며, MCP는 로컬/에이전트 전용이다.
+
+### 온디맨드 스크립트 (NotebookLM 보고·팟캐스트)
+
+로컬에서 이번 run 기준 **보고 요약** 또는 **팟캐스트/슬라이드**를 생성하려면:
+
+1. 사전: `pip install notebooklm-mcp-cli` 후 `nlm login` 1회 실행.
+2. 예시:
+   ```bash
+   python scripts/notebooklm_on_demand.py --action podcast [--notebook-id <ID>] [--dry-run]
+   python scripts/notebooklm_on_demand.py --action report --dry-run   # 호출 없이 검증만
+   ```
+3. `--dry-run`: 실제 NotebookLM 호출 없이 인자 검증만 수행.
+4. 실패 시: stderr 메시지 확인. `nlm login` 만료 또는 미설치 안내가 있으면 [docs/runbooks/NOTEBOOKLM_MCP_RUNBOOK.md](docs/runbooks/NOTEBOOKLM_MCP_RUNBOOK.md) 참고.
 
 ---
 
@@ -266,3 +283,25 @@ docker run -d --env-file .env --name iran-uae-monitor iran-uae-monitor
 ## 📄 라이선스
 
 Internal Use Only — UAE 교민 안전 목적 비상업적 사용
+## NotebookLM 온디맨드/요약 재생성 (MCP 보조 경로)
+
+- 실행 정책: CI/GHA는 Python API만 사용하며, MCP는 로컬/에이전트 보조용입니다.
+- 온디맨드 실행 스크립트: `python scripts/notebooklm_on_demand.py`
+
+```bash
+# 이번 run 전체 소스 기준 요약(JSON/Markdown)
+python scripts/notebooklm_on_demand.py --action report --dry-run
+
+# 팟캐스트/슬라이드 생성 (실행)
+python scripts/notebooklm_on_demand.py --action podcast [--source-id <SOURCE_ID>]
+python scripts/notebooklm_on_demand.py --action slides [--source-id <SOURCE_ID>]
+
+# MCP 모드(로컬 nlm만 사용)
+python scripts/notebooklm_on_demand.py --action report --use-mcp --dry-run
+```
+
+- 반환 값은 JSON contract:
+  - `{"ok": true, "run_id": "...", "action": "...", "notebook_url": "..."}`
+  - 실패: `{"ok": false, "error": "..."}`
+- 대시보드 재생성 API: `POST /api/notebooklm/refresh`
+  - body: `{ "run_id": "...", "action": "report", "source_id": "...", "format": "json" }`

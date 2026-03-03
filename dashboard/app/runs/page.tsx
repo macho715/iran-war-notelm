@@ -1,3 +1,4 @@
+import RegenerateSummaryButton from "../components/RegenerateSummaryButton";
 import { fetchRunsSafe } from "../../lib/queries";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,7 @@ export default async function RunsPage() {
             <th>sentiment</th>
             <th>summary_ad</th>
             <th>summary_dxb</th>
+            <th>요약 재생성</th>
           </tr>
         </thead>
         <tbody>
@@ -45,6 +47,9 @@ export default async function RunsPage() {
               <td>{r.sentiment ?? ""}</td>
               <td style={{ maxWidth: 300 }}>{r.summary_ad ?? ""}</td>
               <td style={{ maxWidth: 300 }}>{r.summary_dxb ?? ""}</td>
+              <td>
+                <RegenerateSummaryButton runId={r.run_id} sourceId={r.source_id} />
+              </td>
             </tr>
           ))}
         </tbody>

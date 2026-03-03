@@ -1,0 +1,86 @@
+name: NotebookLM Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to regenerate"
+        required: true
+        default: "report"
+        type: choice
+        options:
+          - report
+          - podcast
+          - slides
+      run_id:
+        description: "Run correlation id"
+        required: false
+      source_id:
+        description: "Optional source id"
+        required: false
+      use_mcp:
+        description: "Use MCP/ai mode for notebooklm_on_demand"
+        required: false
+        default: "false"
+      dry_run:
+        description: "Dry run mode"
+        required: false
+        default: "false"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run NotebookLM on-demand
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_WHATSAPP_FROM: ${{ secrets.TWILIO_WHATSAPP_FROM }}
+          WHATSAPP_RECIPIENTS: ${{ secrets.WHATSAPP_RECIPIENTS }}
+          NOTEBOOKLM_ON_DEMAND_TIMEOUT_SEC: 300
+          NL_MCP_FORCE: true
+        run: |
+          ACTION="${{ github.event.inputs.action }}"
+          RUN_ID="${{ github.event.inputs.run_id }}"
+          SOURCE_ID="${{ github.event.inputs.source_id }}"
+          USE_MCP="${{ github.event.inputs.use_mcp }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+
+          CMD=(python scripts/notebooklm_on_demand.py --action "$ACTION")
+          if [ -n "$RUN_ID" ]; then
+            CMD+=(--run-id "$RUN_ID")
+          fi
+          if [ -n "$SOURCE_ID" ]; then
+            CMD+=(--source-id "$SOURCE_ID")
+          fi
+          if [ "$USE_MCP" = "true" ]; then
+            CMD+=(--use-mcp)
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            CMD+=(--dry-run)
+          fi
+
+          "${CMD[@]}"
