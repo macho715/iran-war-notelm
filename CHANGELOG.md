@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## [2.0.6] - 2026-03-03
+
+### Added
+
+- Deep-Synth 관측성 개선(실행기) 반영:
+  - APScheduler 이벤트 리스너(`EVENT_JOB_ERROR`, `EVENT_JOB_MISSED`) 추가.
+  - 이벤트 알림은 `SCHEDULER_ALERT_ENABLED` 플래그(기본값 `false`)로 제어.
+  - 파이프라인 실패 알림은 `HEALTH_ALERT_ENABLED` 플래그(기본값 `false`)로 분리 제어.
+
+### Changed
+
+- 헬스 상태 스키마 확장:
+  - `health.py` 응답에 `last_run_ts`, `counts`(`new_count`/`total_count`/`unique_count`) 반영.
+  - 기존 `last_success_at`, `last_article_count` 하위 호환 유지.
+- 스크래퍼 공통 동작 안정화:
+  - `SCRAPER_TIMEOUT_MS=30000`, `SCRAPER_WAIT_UNTIL=domcontentloaded`를 설정값으로 통합.
+  - `social_media.py` Playwright timeout/`wait_until` 하드코딩 제거(설정 기반 적용).
+- 문서 동기화:
+  - `ARCHITECTURE.md`/`README.md`에 스케줄러 관측성, 건강 상태 확장, 플래그 기반 경보 정책 반영.
+
 ## [2.0.5] - 2026-03-03
 
 ### Updated

@@ -26,6 +26,7 @@ C:\Users\jichu\Downloads\iran-war-notelm-main
 - Dedup 정책: run-local MD5 해시 + DB(`articles.canonical_url`) 이중 필터
 - Option A(JSON 아카이브): `reports/{YYYY-MM-DD}/{HH-MM}.json` + `reports/{YYYY-MM-DD}.jsonl` 저장
 - 중첩 폴더 `iran-war-notelm-main\iran-war-notelm-main`는 실행 대상 아님
+- 관측성/안정성: APScheduler 이벤트 감시 + 헬스 API 확장(최근 실행 시각/에러/카운트)
 
 ---
 
@@ -52,6 +53,7 @@ flowchart TD
     F --> P2["🧠 Phase 2 AI<br/>위협 분석"]
     P2 -->|HIGH/CRITICAL| ALERT["🚨 즉시 경보"]
     P2 --> G["📝 Markdown 브리핑 생성"]
+    A --> J["🧪 스케줄러 이벤트 감시<br/>EVENT_JOB_ERROR/MISSED"]
 
     G --> H["📡 Telegram<br/>개인 알림"]
     G --> I["💬 WhatsApp<br/>Twilio 팀 전송"]
@@ -62,6 +64,7 @@ flowchart TD
     style H fill:#0088cc,color:#fff
     style I fill:#25d366,color:#fff
     style Z fill:#888,color:#fff
+    style J fill:#f39c12,color:#fff
 ```
 
 ---
@@ -76,6 +79,7 @@ flowchart TD
 | 🧠 **Phase 2 AI 위협 평가** | NotebookLM query 기반 위협 분석, 실패 시 rule-based fallback |
 | 🚨 **HIGH/CRITICAL 즉시 경보** | 위협 레벨에 따른 조건부 즉시 Telegram 경보 |
 | 📊 **감성/도시별 리스크** | 긴급·일반·회복 감성, 아부다비/두바이 리스크 분석 |
+| 🧪 **관측성 가시성** | APScheduler `EVENT_JOB_ERROR/MISSED` 감시 로그 + `health` 응답 확장 |
 | 📰 **RSS 수집 안정화** | Gulf News(`/feed`) + Al Bawaba + BBC + AP(옵션) 집계 수집 |
 | ❤️ **헬스 상태 추적** | `.health_state.json` 업데이트 + `health.py` 상태 확인 API |
 | 💾 **Option A JSON 아카이브** | 매 사이클 기사/분석/NotebookLM URL을 `reports/`에 영구 저장 |
@@ -120,6 +124,12 @@ REPORTS_ARCHIVE_DIR=reports
 DATABASE_URL=<neon_dsn>
 STORAGE_BACKEND=postgres
 # Vercel Dashboard에서도 동일 DATABASE_URL을 사용해야 합니다.
+
+# Deep-Synth 관측성 옵션
+SCHEDULER_ALERT_ENABLED=false        # APScheduler JOB_ERROR/MISSED 이벤트 알림
+HEALTH_ALERT_ENABLED=false           # 파이프라인 실패 시 헬스 알림
+SCRAPER_TIMEOUT_MS=30000            # UAE/SNS Playwright 공통 timeout(ms)
+SCRAPER_WAIT_UNTIL=domcontentloaded  # Playwright waitUntil 정책
 ```
 
 ### 3. NotebookLM 로그인 (최초 1회)
@@ -164,6 +174,7 @@ python -m pytest -q
 4. Vercel에서 최신 `run` 조회/표시 확인
 5. Telegram/WhatsApp 전송 실패 또는 승인 거절 시 outbox 저장 확인
 6. 신규 기사 유입 샘플(run1 `new_count=2`) 후 즉시 2회차 재실행(run2 `new_count=0`)으로 중복 전송 억제 확인
+7. `health` API 확인(`last_run_ts`, `counts`, `last_error`) 및 `EVENT_JOB_ERROR/MISSED` 로그 발생 억제/발생 규칙 검증
 
 ---
 
