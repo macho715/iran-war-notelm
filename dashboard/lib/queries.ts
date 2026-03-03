@@ -35,6 +35,16 @@ export type OutboxRow = {
   file_path: string | null;
 };
 
+export type OutboxInsertInput = {
+  msgId: string;
+  runId: string;
+  channel: string;
+  payload: string;
+  status: string;
+  filePath: string | null;
+  createdTs: string;
+};
+
 export type SafeRowsResult<T> = {
   rows: T[];
   error: string | null;
@@ -155,4 +165,23 @@ export async function updateOutboxStatus(
      WHERE msg_id = $3`,
     [status, lastError, msgId]
   );
+}
+
+export async function createOutboxRow(input: OutboxInsertInput): Promise<string> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO outbox
+      (msg_id, run_id, channel, payload, status, attempts, last_error, created_ts, file_path)
+     VALUES ($1, $2, $3, $4, $5, 0, NULL, $6, $7)`,
+    [
+      input.msgId,
+      input.runId,
+      input.channel,
+      input.payload,
+      input.status,
+      input.createdTs,
+      input.filePath,
+    ]
+  );
+  return input.msgId;
 }
