@@ -159,7 +159,7 @@ async def _send_telegram_report_compat(
     approval_required: bool = False,
 ) -> dict[str, bool]:
     sender = _send_telegram_report_impl
-    if sender is _send_telegram_report_compat or sender is send_telegram_report:
+    if sender is _send_telegram_report_compat:
         sender = _canonical_reporter.send_telegram_report
 
     return await _invoke_report_sender(

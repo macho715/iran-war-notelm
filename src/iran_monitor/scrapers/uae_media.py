@@ -105,7 +105,11 @@ async def _scrape_playwright(source: dict) -> list[dict]:
             browser = await p.chromium.launch(headless=settings.HEADLESS)
             context = await browser.new_context(ignore_https_errors=True)
             page = await context.new_page()
-            await page.goto(source["playwright_url"], wait_until="domcontentloaded", timeout=30000)
+            await page.goto(
+                source["playwright_url"],
+                wait_until=settings.SCRAPER_WAIT_UNTIL,
+                timeout=settings.SCRAPER_TIMEOUT_MS,
+            )
             # h2, h3 태그 안에 있는 링크 찾기
             headings = await page.query_selector_all("h2 a, h3 a, article a")
             for h in headings[:10]:

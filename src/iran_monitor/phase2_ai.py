@@ -8,7 +8,6 @@ If query fails or returns invalid output, rule-based fallback is used.
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Literal, TypedDict
 
 
@@ -104,20 +103,93 @@ def extract_json_payload(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+    fenced = _extract_fenced_json(text)
     if fenced:
-        parsed = json.loads(fenced.group(1))
+        parsed = json.loads(fenced)
         if isinstance(parsed, dict):
             return parsed
 
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        parsed = json.loads(text[start : end + 1])
+    for candidate in _extract_json_candidates(text):
+        parsed = json.loads(candidate)
         if isinstance(parsed, dict):
             return parsed
 
     raise ValueError("no valid JSON object found")
+
+
+def _extract_fenced_json(text: str) -> str | None:
+    lines = text.splitlines()
+    in_fence = False
+    started = False
+    buffer: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            marker = stripped[3:].strip().lower()
+            if not in_fence:
+                if marker == "json" or marker == "":
+                    in_fence = True
+                    started = True
+                    continue
+                continue
+            if marker == "":
+                break
+            in_fence = False
+            break
+
+        if in_fence:
+            buffer.append(line)
+
+    if not in_fence and started:
+        content = "\n".join(buffer).strip()
+        if content:
+            return content
+    return None
+
+
+def _extract_json_candidates(text: str) -> list[str]:
+    """
+    Return valid JSON candidate substrings by scanning balanced braces.
+    Backtracking is avoided by linear scan.
+    """
+    candidates: list[str] = []
+    start = -1
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for i, ch in enumerate(text):
+        if escaped:
+            escaped = False
+            continue
+
+        if ch == "\\" and in_string:
+            escaped = True
+            continue
+
+        if ch == '"':
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+            continue
+
+        if ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    candidates.append(text[start : i + 1])
+                    start = -1
+            continue
+
+    return candidates
 
 
 def _to_int(value: Any, default: int) -> int:
@@ -381,4 +453,3 @@ def should_send_immediate_alert(analysis: AnalysisResult | None, alert_levels_cs
         return False
     allowed = {normalize_level(s.strip(), default="LOW") for s in alert_levels_csv.split(",") if s.strip()}
     return analysis["threat_level"] in allowed
-
