@@ -16,6 +16,24 @@ function errMessage(err: unknown): string {
   return String(err);
 }
 
+type SpawnErrorLike = Error & {
+  code?: string | number;
+  errno?: string | number;
+};
+
+function isPythonSpawnError(err: unknown): boolean {
+  const message = errMessage(err);
+  if (/spawn/i.test(message) && /ENOENT/i.test(message)) {
+    return true;
+  }
+
+  const anyErr = err as SpawnErrorLike;
+  if (anyErr?.code && String(anyErr.code).toUpperCase() === "ENOENT") {
+    return true;
+  }
+  return message.includes("Python 실행기를 찾을 수 없습니다") || message.includes("python 실행기");
+}
+
 type RefreshRequest = {
   run_id?: string;
   source_id?: string;
@@ -96,7 +114,12 @@ async function runNotebooklmScript(script: string, args: string[]): Promise<Exec
       if (nodeErr.type === "spawn_error") {
         const isLast = candidate === candidates[candidates.length - 1];
         if (isLast) {
-          throw new Error(`Python 실행기를 찾을 수 없습니다. 시도한 명령어: ${candidates.join(", ")}`);
+          const spawnErr = new Error(`Python 실행기를 찾을 수 없습니다. 시도한 명령어: ${candidates.join(", ")}`) as Error & {
+            code?: string;
+            errno?: string;
+          };
+          spawnErr.code = "ENOENT";
+          throw spawnErr;
         }
         continue;
       }
@@ -339,7 +362,7 @@ export async function POST(req: NextRequest) {
       });
     } catch (err) {
       const msg = errMessage(err);
-      if (msg.includes("Python 실행기를 찾을 수 없습니다") || msg.includes("python 실행기")) {
+      if (isPythonSpawnError(err) || isPythonSpawnError(msg)) {
         // fallback to workflow dispatch in constrained envs
         const workflow = await dispatchWorkflow(body.action, runId, body.source_id, notebookId, useMcp, dryRun);
         const outboxMsgId = await createRefreshOutbox(runId, body.action, body.source_id, workflow);
