@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -45,6 +47,8 @@ async def test_update_hyie_state_writes_state_and_snapshot(tmp_path: Path, monke
     monkeypatch.setattr(monitor_app, "HYIE_STATE_META_FILE", tmp_path / "state" / "hyie_state.meta.json")
     monkeypatch.setattr(monitor_app, "HYIE_INGEST_LOCK_FILE", tmp_path / "state" / "hyie_ingest.lock")
     monkeypatch.setattr(monitor_app, "HYIE_EGRESS_ETA_FILE", tmp_path / "state" / "egress_eta.json")
+    fixed_now = datetime(2026, 3, 4, 12, 0, 0, tzinfo=ZoneInfo("Asia/Dubai"))
+    monkeypatch.setattr(monitor_app, "_now_dubai", lambda: fixed_now)
 
     flags: list[str] = []
     payload = await monitor_app._update_hyie_state(

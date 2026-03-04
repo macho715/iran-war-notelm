@@ -64,9 +64,9 @@ def test_build_state_payload_degraded_with_source_failures():
     payload = build_state_payload(
         signals=[],
         source_health={
-            "s1": {"ok": False, "status": "timeout"},
-            "s2": {"ok": False, "status": "timeout"},
-            "s3": {"ok": False, "status": "http_non_2xx"},
+            "s1": {"ok": False, "status": "timeout", "tier": "TIER0", "priority": "critical"},
+            "s2": {"ok": False, "status": "timeout", "tier": "TIER0", "priority": "critical"},
+            "s3": {"ok": False, "status": "http_non_2xx", "tier": "TIER0", "priority": "critical"},
             "s4": {"ok": True, "status": "ok"},
         },
     )

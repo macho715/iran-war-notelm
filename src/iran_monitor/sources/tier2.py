@@ -58,7 +58,8 @@ TIER2_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier2_enoc",
         name="ENOC",
-        url="https://www.enoc.com/",
+        # enoc.com blocks automated clients; Google News RSS indexed to enoc.com is stable
+        url="https://news.google.com/rss/search?q=site:enoc.com+fuel+price+UAE&hl=en-AE&gl=AE&ceid=AE:en",
         tier="TIER2",
         indicator_ids=("I06",),
         keywords=("fuel", "prices", "stations", "service", "supply"),
@@ -135,7 +136,8 @@ TIER2_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier2_saudi_border",
         name="Saudi Public Security",
-        url="https://www.psd.gov.sa/",
+        # psd.gov.sa regularly times out from CI runners; SPA is consistently reachable
+        url="https://www.spa.gov.sa/en",
         tier="TIER2",
         indicator_ids=("I04",),
         keywords=("border", "crossing", "security", "restricted", "closed"),

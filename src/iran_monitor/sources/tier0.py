@@ -10,7 +10,8 @@ TIER0_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier0_us_embassy_uae",
         name="US Embassy UAE",
-        url="https://ae.usembassy.gov/u-s-citizen-services/security-and-travel-information/",
+        # legacy security-and-travel-information path returns 404; services hub is stable
+        url="https://ae.usembassy.gov/u-s-citizen-services/",
         tier="TIER0",
         indicator_ids=("I01", "I07"),
         keywords=("security alert", "travel advisory", "ordered departure", "do not travel", "leave immediately"),
@@ -50,7 +51,8 @@ TIER0_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier0_etihad_updates",
         name="Etihad Travel Updates",
-        url="https://www.etihad.com/en/travel-updates",
+        # etihad.com often times out in CI/cloud; use Google News index constrained to etihad.com
+        url="https://news.google.com/rss/search?q=site:etihad.com+travel+updates&hl=en-AE&gl=AE&ceid=AE:en",
         tier="TIER0",
         indicator_ids=("I02",),
         keywords=("flight", "cancel", "suspend", "disruption", "resume", "operational update"),
@@ -89,7 +91,8 @@ TIER0_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier0_uae_mod",
         name="UAE Ministry of Defence",
-        url="https://www.mod.gov.ae/en",
+        # /en path currently 404; root page responds and still contains defense updates
+        url="https://mod.gov.ae",
         tier="TIER0",
         indicator_ids=("I03",),
         keywords=("missile", "drone", "intercepted", "attack", "operation", "armed forces"),

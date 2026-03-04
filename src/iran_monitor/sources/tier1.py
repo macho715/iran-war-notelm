@@ -49,7 +49,8 @@ TIER1_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier1_bbc_world",
         name="BBC World",
-        url="https://www.bbc.com/news/world/middle_east",
+        # web page can be blocked in CI; RSS feed is consistently accessible
+        url="https://feeds.bbci.co.uk/news/world/rss.xml",
         tier="TIER1",
         indicator_ids=("I03",),
         keywords=("iran", "uae", "attack", "strike", "drone", "missile", *ALERT_KEYWORDS),
@@ -101,7 +102,8 @@ TIER1_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier1_timeout_abudhabi",
         name="Time Out Abu Dhabi",
-        url="https://www.timeoutabudhabi.com/news",
+        # local subdomain often returns 403; use global Time Out news feed endpoint
+        url="https://www.timeout.com/news",
         tier="TIER1",
         indicator_ids=("I04",),
         keywords=("road", "closure", "traffic", "alert", "border", "restricted", *ALERT_KEYWORDS),
@@ -210,7 +212,8 @@ TIER1_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier1_ndtv_world",
         name="NDTV World",
-        url="https://www.ndtv.com/world-news",
+        # main page frequently returns 403; use public RSS feed
+        url="https://feeds.feedburner.com/ndtvnews-world-news",
         tier="TIER1",
         indicator_ids=("I07",),
         keywords=("evacuation", "special flight", "uae", "middle east", *ALERT_KEYWORDS),
