@@ -35,6 +35,9 @@ class SourceHealth(TypedDict, total=False):
     checked_at: str
     error: str
     http_status: int
+    interval_min: int
+    priority: str
+    collection_target: str
 
 
 INDICATOR_META: dict[str, dict[str, str]] = {

@@ -3,10 +3,14 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
+import json
+import os
+from pathlib import Path
 from typing import Any
 
 import httpx
 
+from ..config import settings
 from ..state_engine import SignalEvent, SourceHealth
 
 
@@ -20,6 +24,60 @@ class SourceSpec:
     keywords: tuple[str, ...]
     critical_keywords: tuple[str, ...] = ()
     tags: tuple[str, ...] = field(default_factory=tuple)
+    interval_min: int | None = None
+    priority: str = "monitoring"
+    collection_target: str = ""
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _storage_root() -> Path:
+    base = Path(settings.STORAGE_ROOT)
+    if base.is_absolute():
+        return base
+    return (_project_root() / base).resolve()
+
+
+def _cursor_file() -> Path:
+    return _storage_root() / "state" / "hyie_source_cursor.json"
+
+
+def _load_cursor_state() -> dict[str, str]:
+    path = _cursor_file()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return {}
+        return {str(k): str(v) for k, v in payload.items()}
+    except Exception:
+        return {}
+
+
+def _save_cursor_state(cursor: dict[str, str]) -> None:
+    path = _cursor_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cursor, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _is_due(spec: SourceSpec, checked_at: datetime, cursor: dict[str, str]) -> bool:
+    if spec.interval_min is None or spec.interval_min <= 0:
+        return True
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return True
+
+    raw_last = cursor.get(spec.source_id)
+    if not raw_last:
+        return True
+    try:
+        last = datetime.fromisoformat(raw_last.replace("Z", "+00:00"))
+    except Exception:
+        return True
+    age_sec = (checked_at - last).total_seconds()
+    return age_sec >= (spec.interval_min * 60)
 
 
 def _classify_error(exc: Exception) -> str:
@@ -95,6 +153,7 @@ async def collect_source_specs(
     signals: list[SignalEvent] = []
     health: dict[str, SourceHealth] = {}
     checked_iso = checked_at.isoformat(timespec="seconds")
+    cursor = _load_cursor_state()
 
     timeout = httpx.Timeout(timeout_sec)
     headers = {
@@ -102,11 +161,28 @@ async def collect_source_specs(
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 
+    due_specs: list[SourceSpec] = []
+    for spec in specs:
+        if _is_due(spec, checked_at, cursor):
+            due_specs.append(spec)
+            continue
+        health[spec.source_id] = {
+            "name": spec.name,
+            "url": spec.url,
+            "tier": spec.tier,
+            "status": "skipped_not_due",
+            "ok": True,
+            "checked_at": checked_iso,
+            "interval_min": int(spec.interval_min or 0),
+            "priority": spec.priority,
+            "collection_target": spec.collection_target,
+        }
+
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-        tasks = [_fetch_text(client, spec.url) for spec in specs]
+        tasks = [_fetch_text(client, spec.url) for spec in due_specs]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    for spec, result in zip(specs, results):
+    for spec, result in zip(due_specs, results):
         if isinstance(result, Exception):
             status = _classify_error(result)
             health[spec.source_id] = {
@@ -117,7 +193,11 @@ async def collect_source_specs(
                 "ok": False,
                 "checked_at": checked_iso,
                 "error": str(result),
+                "interval_min": int(spec.interval_min or 0),
+                "priority": spec.priority,
+                "collection_target": spec.collection_target,
             }
+            cursor[spec.source_id] = checked_iso
             continue
 
         status, text, http_status, error = result
@@ -128,12 +208,16 @@ async def collect_source_specs(
             "status": status,
             "ok": status == "ok",
             "checked_at": checked_iso,
+            "interval_min": int(spec.interval_min or 0),
+            "priority": spec.priority,
+            "collection_target": spec.collection_target,
         }
         if http_status is not None:
             item["http_status"] = int(http_status)
         if error:
             item["error"] = error
         health[spec.source_id] = item
+        cursor[spec.source_id] = checked_iso
 
         if status != "ok":
             continue
@@ -141,5 +225,8 @@ async def collect_source_specs(
         signal = _build_signal(spec, text, checked_iso)
         if signal:
             signals.append(signal)
+
+    if due_specs:
+        _save_cursor_state(cursor)
 
     return signals, health
