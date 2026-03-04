@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     # HyIE-ERC2 real-time state
     HYIE_ENABLED: bool = True
     HYIE_STATE_FILE: str = "state/hyie_state.json"
-    HYIE_SOURCE_TIMEOUT_SEC: int = 12
+    HYIE_SOURCE_TIMEOUT_SEC: int = 20
     HYIE_APPEND_REPORTS_JSONL: bool = True
     HYIE_APPEND_URGENTDASH_JSONL: bool = True
     HYIE_EGRESS_ETA_FILE: str = "state/egress_eta.json"
