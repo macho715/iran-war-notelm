@@ -1,0 +1,70 @@
+name: Urgentdash Live State Publish (30m)
+
+on:
+  schedule:
+    # Every 30 minutes (UTC), offset from :00 to reduce queue contention.
+    - cron: "7,37 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  publish-live-state:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build HyIE state snapshot
+        env:
+          PHASE2_ENABLED: "false"
+          STORAGE_ROOT: "."
+        run: |
+          python scripts/update_hyie_state_now.py
+          python scripts/export_hyie_live.py --out-dir live
+
+      - name: Publish live payload to urgentdash-live branch
+        env:
+          LIVE_BRANCH: urgentdash-live
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git worktree add /tmp/urgentdash-live "origin/${LIVE_BRANCH}"
+          else
+            git worktree add -b "${LIVE_BRANCH}" /tmp/urgentdash-live
+          fi
+
+          mkdir -p /tmp/urgentdash-live/live
+          cp live/hyie_state.json /tmp/urgentdash-live/live/hyie_state.json
+          cp live/last_updated.json /tmp/urgentdash-live/live/last_updated.json
+
+          cd /tmp/urgentdash-live
+          git add live/hyie_state.json live/last_updated.json
+
+          if git diff --cached --quiet; then
+            echo "No live state changes to publish."
+            exit 0
+          fi
+
+          git commit -m "chore: publish urgentdash live state"
+          git push origin HEAD:"${LIVE_BRANCH}"
+

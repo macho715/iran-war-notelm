@@ -94,6 +94,21 @@ python scripts/backup_urgentdash.py urgentdash/urgentdash_snapshot.example.json 
 
 ---
 
+## 3-1. 30분 자동 업데이트 파이프라인 (dashboard live feed)
+
+`urgentdash` 대시보드가 30분마다 최신 상태를 반영하도록 아래 워크플로우를 사용한다.
+
+- 워크플로우: `.github/workflows/urgentdash-live-publish.yml`
+- 주기: `7,37 * * * *` (UTC, 30분 간격)
+- 동작:
+  1. `scripts/update_hyie_state_now.py`로 HyIE 상태 파일 갱신
+  2. `scripts/export_hyie_live.py`로 `live/hyie_state.json` 생성
+  3. `urgentdash-live` 브랜치에 `live/*.json` 발행
+- 대시보드 측(`urgentdash/index.html`, `urgentdash/hyie-erc2-dashboard.jsx`)은
+  `raw.githubusercontent.com/.../urgentdash-live/live/hyie_state.json`을 우선 polling한다.
+
+---
+
 ## 4. 요약
 
 - **실시간 정보** = (1) 스크래퍼 결과 + (2) urgentdash 스냅샷.
