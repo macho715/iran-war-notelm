@@ -1,6 +1,10 @@
 name: Iran-UAE Monitor (hourly)
 
 on:
+  push:
+    branches:
+      - main
+      - feature/hyie-realtime-hotfix-pack
   schedule:
     # GitHub Actions schedule runs in UTC. Avoid 00 minute to reduce queue contention.
     - cron: '7,22,37,52 * * * *'
