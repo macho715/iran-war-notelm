@@ -163,6 +163,8 @@ python -m pytest -q
 - Runner: GitHub Actions → `scripts/run_now.py --telegram-send`
 - Data plane: Neon/Postgres(`DATABASE_URL`) + 기존 JSON/JSONL 아카이브
 - Control plane: Vercel dashboard (`dashboard/`, root directory `dashboard`)
+- Vercel skip/build 판정: `dashboard/vercel.json` → `scripts/vercel-ignore-dashboard.sh` 사용
+  (`VERCEL_GIT_PREVIOUS_SHA..VERCEL_GIT_COMMIT_SHA` 전체 push 범위 기준)
 - 단일 인스턴스: `state/monitor.lock` 가드로 다중 실행 차단
 - 중복 억제: run-local hash + DB `articles.canonical_url`
 
