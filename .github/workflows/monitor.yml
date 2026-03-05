@@ -82,31 +82,23 @@ jobs:
 
       - name: Publish hyie_state.json to urgentdash-live branch
         if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -f state/hyie_state.json ]; then
-            CONTENT=$(base64 -w0 state/hyie_state.json)
-            SHA=$(gh api repos/${{ github.repository }}/contents/live/hyie_state.json \
-              --jq '.sha' 2>/dev/null || echo "")
-            if [ -n "$SHA" ]; then
-              gh api repos/${{ github.repository }}/contents/live/hyie_state.json \
-                -X PUT \
-                -f message="chore: update hyie_state.json [skip ci]" \
-                -f content="$CONTENT" \
-                -f sha="$SHA" \
-                -f branch="urgentdash-live"
-            else
-              gh api repos/${{ github.repository }}/contents/live/hyie_state.json \
-                -X PUT \
-                -f message="chore: update hyie_state.json [skip ci]" \
-                -f content="$CONTENT" \
-                -f branch="urgentdash-live"
-            fi
-            echo "hyie_state.json published to urgentdash-live branch"
-          else
+          if [ ! -f state/hyie_state.json ]; then
             echo "state/hyie_state.json not found, skipping publish"
+            exit 0
           fi
+          cp state/hyie_state.json /tmp/hyie_state.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin urgentdash-live
+          git checkout urgentdash-live
+          mkdir -p live
+          cp /tmp/hyie_state.json live/hyie_state.json
+          git add live/hyie_state.json
+          git diff --cached --quiet && echo "No changes" || \
+            git commit -m "chore: update hyie_state.json [skip ci]" && \
+            git push origin urgentdash-live
+          echo "Published hyie_state.json to urgentdash-live branch"
 
       - name: Upload artifacts (reports/state/ledger) for debugging
         if: always()
