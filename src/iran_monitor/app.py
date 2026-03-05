@@ -36,6 +36,7 @@ from .phase2_ai import (
     should_send_immediate_alert,
 )
 from .reporter import build_report_text, send_telegram_report, send_telegram_alert
+from .route_geo import build_route_geo_payload
 from .scrapers.rss_feed import scrape_rss
 from .scrapers.social_media import scrape_social_media
 from .scrapers.uae_media import scrape_uae_media
@@ -854,6 +855,7 @@ def _persist_hyie_state(payload: dict[str, Any]) -> bool:
             "hypotheses": payload.get("hypotheses", []),
             "routes": payload.get("routes", []),
             "checklist": payload.get("checklist", []),
+            "route_geo": payload.get("route_geo"),
         }
         daily_jsonl = root / "urgentdash_snapshots" / f"{date_part}.jsonl"
         hourly_json = root / "urgentdash_snapshots" / date_part / f"{hour_part}.json"
@@ -861,6 +863,35 @@ def _persist_hyie_state(payload: dict[str, Any]) -> bool:
         save_json(hourly_json, snapshot_payload)
 
     return True
+
+
+def _inject_ai_analysis_into_hyie_state(analysis: AnalysisResult, notebook_url: str | None) -> None:
+    """AI 분석 결과를 hyie_state.json에 병합 (urgentdash React 앱에서 표시 가능)."""
+    if not HYIE_STATE_FILE.exists():
+        return
+    try:
+        payload = json.loads(HYIE_STATE_FILE.read_text(encoding="utf-8"))
+        payload["ai_analysis"] = {
+            "threat_level": analysis.get("threat_level"),
+            "threat_score": analysis.get("threat_score"),
+            "sentiment": analysis.get("sentiment"),
+            "abu_dhabi_level": analysis.get("abu_dhabi_level"),
+            "dubai_level": analysis.get("dubai_level"),
+            "summary": analysis.get("summary"),
+            "recommended_action": analysis.get("recommended_action"),
+            "key_points": analysis.get("key_points", []),
+            "analysis_source": analysis.get("analysis_source"),
+            "notebook_url": notebook_url,
+            "updated_at": _now_dubai().isoformat(timespec="seconds"),
+        }
+        save_json(HYIE_STATE_FILE, payload)
+        logger.info(
+            "HyIE state AI 분석 결과 주입 완료",
+            threat_level=analysis.get("threat_level"),
+            analysis_source=analysis.get("analysis_source"),
+        )
+    except Exception as exc:
+        logger.warning("HyIE state AI 분석 주입 실패", error=str(exc))
 
 
 async def _update_hyie_state(all_articles: list[dict[str, Any]], run_ts: str, flags: list[str]) -> dict[str, Any] | None:
@@ -886,6 +917,7 @@ async def _update_hyie_state(all_articles: list[dict[str, Any]], run_ts: str, fl
             prev_state=prev_state,
             manual_egress_eta_h=manual_eta_h,
         )
+        payload["route_geo"] = build_route_geo_payload()
         changed = _persist_hyie_state(payload)
 
         if payload.get("degraded"):
@@ -950,15 +982,16 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
         logger.info("신규 기사 필터링 완료", new_count=len(new_articles))
 
         if not new_articles:
-            analysis = _fallback_analysis([])
+            analysis = _fallback_analysis(all_articles)
             flags.append("NO_NEW_ARTICLES")
+            _inject_ai_analysis_into_hyie_state(analysis, None)
             _persist_storage(analysis=analysis, articles=[], report_text="", notebook_url=None, flags=flags)
             _write_health_state(
                 "ok",
                 last_success_at=run_ts,
                 last_article_count=0,
                 last_run_ts=run_ts,
-                counts={"new_count": 0, "total_count": 0, "unique_count": 0},
+                counts={"new_count": 0, "total_count": len(all_articles), "unique_count": 0},
             )
             logger.info("새로운 소식 없음, 보고 전송 생략")
             return
@@ -972,6 +1005,8 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
         analysis = await loop.run_in_executor(None, _analyze_phase2, new_articles, notebook_context)
         analysis = _apply_verification_gate(analysis, new_articles)
         notebook_url = (notebook_context or {}).get("notebook_url")
+
+        _inject_ai_analysis_into_hyie_state(analysis, notebook_url)
 
         if should_send_immediate_alert(analysis, settings.PHASE2_ALERT_LEVELS) and analysis.get("analysis_verified", True):
             alert_ok = await send_telegram_alert(_build_immediate_alert_message(analysis, notebook_url=notebook_url))
@@ -1057,7 +1092,7 @@ async def main(*, approval_required: bool = False, dry_run: bool = False) -> Non
     scheduler.add_job(
         hourly_job,
         "interval",
-        hours=1,
+        minutes=30,
         next_run_time=datetime.now(),
         kwargs={"approval_required": approval_required, "dry_run": dry_run},
     )
@@ -1065,7 +1100,7 @@ async def main(*, approval_required: bool = False, dry_run: bool = False) -> Non
 
     try:
         while True:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(1800)
     except (KeyboardInterrupt, SystemExit):
         logger.info("시스템 종료")
         scheduler.shutdown()
