@@ -10,7 +10,7 @@ export const STORAGE_KEYS = {
 export const HISTORY_MAX_POINTS = 96;
 export const TIMELINE_MAX = 220;
 
-export const POLL_INTERVAL_MS = 15 * 60 * 1000;
+export const POLL_INTERVAL_MS = 30 * 60 * 1000;
 export const FULL_SYNC_INTERVAL_MS = POLL_INTERVAL_MS;
 export const FAST_POLL_MS_DEFAULT = 30 * 1000;
 export const FAST_COUNTDOWN_SECONDS = 30;
@@ -18,7 +18,7 @@ export const COUNTDOWN_SECONDS = FAST_COUNTDOWN_SECONDS;
 export const LIVE_STALE_THRESHOLD_SECONDS = 180;
 
 export const MIN_EVIDENCE_SOURCES = 2;
-export const FALLBACK_EGRESS_LOSS_ETA = 2;
+export const FALLBACK_EGRESS_LOSS_ETA = 10;
 
 export const ROUTE_BUFFER_FACTOR = 2.0;
 export const EVENT_NOISE_WINDOW_MS = 10 * 60 * 1000;
@@ -50,6 +50,7 @@ export const DEFAULT_DASHBOARD_CANDIDATES = [
 
 export const DEFAULT_FAST_STATE_CANDIDATES = [
   "http://127.0.0.1:8000/api/state",
+  "https://raw.githubusercontent.com/macho715/iran-war-notelm/urgentdash-live/live/hyie_state.json",
   "/api/state",
   "./api/state",
   "api/state"
