@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>HyIE-ERC² v2026.05 — SHELTER MODE</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚠️</text></svg>"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#020617;font-family:'Inter',-apple-system,system-ui,sans-serif;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef}=React;
+
+const INTEL_FEED=[
+{ts:"Mar 3 14:00",priority:"CRITICAL",verified:true,text:"Emirates & Etihad 모든 상업 운항 3월 5일 14:00까지 중단 연장",src:"LoyaltyLobby / Etihad 공식",impact:"I02 = 1.00 유지. 제한적 본국송환 편만 허용."},
+{ts:"Mar 3 13:30",priority:"CRITICAL",verified:true,text:"미국 국무부 — 중동 12개국 이상 시민에 즉시 출국 촉구",src:"Al Jazeera / NBC News",impact:"I01 state 1.00 재확인. I07 강화."},
+{ts:"Mar 3 12:00",priority:"HIGH",verified:true,text:"이란 3일 연속 걸프 지역 보복 공격 지속 — UAE/카타르/쿠웨이트 폭발",src:"Al Jazeera / CNBC",impact:"I03 = 1.00 유지. active_strike_window = true 연장."},
+{ts:"Mar 3 11:00",priority:"HIGH",verified:true,text:"이스라엘, 이란·헤즈볼라 동시 타격 (테헤란+베이루트) — 분쟁 확대",src:"CNBC Live Updates",impact:"에스컬레이션 추가. 이란 추가 보복 가능성↑"},
+{ts:"Mar 3 10:30",priority:"HIGH",verified:true,text:"인도 특별 구호편 10편 운항, UAE 제한적 출발 재개",src:"Outlook India / India TV",impact:"I07 state 1.00. 타국 대피 본격화."},
+{ts:"Mar 3 09:00",priority:"MEDIUM",verified:true,text:"태국 총리: 군용기 동원 중동 자국민 대피 준비 — 11,000명+ UAE 거주",src:"Nation Thailand",impact:"I07 추가 강화. 군사적 대피 수단 동원 단계."},
+{ts:"Mar 2 22:00",priority:"CRITICAL",verified:true,text:"미 국무부 비긴급 직원 + 가족 UAE 출국 명령 (Ordered Departure)",src:"US Embassy UAE / NBC News",impact:"I01 = 1.00. 미국 Ordered Departure는 극히 이례적."},
+{ts:"Mar 2 20:00",priority:"HIGH",verified:true,text:"AWS 데이터센터 2곳(UAE) + 1곳(바레인) 드론 피격으로 오프라인",src:"CNBC",impact:"I05 state 0.15↑ — 인프라 피해 시작."},
+{ts:"Mar 2 18:00",priority:"MEDIUM",verified:true,text:"UAE 슈퍼마켓 재고 안정화 — 패닉바잉 진정, 정부 비축분 충분",src:"The National / Khaleej Times / Gulf News",impact:"I06 0.50→0.35 하향."},
+{ts:"Mar 2 15:00",priority:"HIGH",verified:true,text:"영국·호주 UAE 여행경보 'Do Not Travel' 최고 단계 격상",src:"VisaHQ / FCDO",impact:"I07 = 1.00 재확인."},
+{ts:"Mar 1 16:00",priority:"CRITICAL",verified:true,text:"UAE 국방부: 탄도미사일 165발, 드론 541기 탐지 — 3사망 58부상",src:"UAE MoD / Khaleej Times",impact:"I03 = 1.00. 파편 낙하로 민간 피해."},
+{ts:"Feb 28 23:00",priority:"CRITICAL",verified:true,text:"이란, 미-이스라엘 공습 보복으로 UAE 포함 걸프 전역 공격 개시",src:"Al Jazeera / CNN / Euronews",impact:"전체 상황 개시점."},
+];
+
+const INDICATORS=[
+{id:"I01",name:"공식 여행경보/대사관 공지",tier:"TIER0",state:1.0,confirmed:true,src:"US State Dept, NL, UK, AU, KR",ts:"Mar 3 13:30",detail:"미국 Ordered Departure, 영국·호주 Do Not Travel, 한국 특별여행주의보",srcCount:5,cv:true},
+{id:"I02",name:"공항/항공 운영",tier:"TIER0",state:1.0,confirmed:true,src:"Etihad, GCAA, LoyaltyLobby",ts:"Mar 3 14:00",detail:"Etihad/Emirates 3/5 14:00까지 전편 중단. 영공 부분 폐쇄.",srcCount:4,cv:true},
+{id:"I03",name:"군사/안보 근접도",tier:"TIER1",state:1.0,confirmed:true,src:"UAE MoD, Al Jazeera, CNN, BBC",ts:"Mar 3 12:00",detail:"3일 연속 이란 공격. 미사일 165발 + 드론 541기. 3사망 58부상.",srcCount:6,cv:true},
+{id:"I04",name:"치안/도로 통제",tier:"TIER1",state:0.60,confirmed:false,src:"Time Out, US Embassy, Canada",ts:"Mar 3 10:00",detail:"파편 지역 도로 폐쇄. 공식 통금 미확인. SMS 공습경보 운영.",srcCount:3,cv:false},
+{id:"I05",name:"통신/인터넷",tier:"TIER1",state:0.15,confirmed:true,src:"CNBC, 직접 확인",ts:"Mar 3 08:00",detail:"일반 통신 정상. AWS UAE DC 2곳 오프라인.",srcCount:2,cv:true},
+{id:"I06",name:"필수재/연료",tier:"TIER2",state:0.35,confirmed:true,src:"The National, Khaleej Times, Gulf News",ts:"Mar 2 20:00",detail:"패닉바잉 진정. 연료 정상 (E-Plus 91: AED 2.40/L).",srcCount:4,cv:true},
+{id:"I07",name:"외국정부 행동",tier:"TIER0",state:1.0,confirmed:true,src:"태국 총리, 인도 항공, UK/AU FCDO",ts:"Mar 3 10:30",detail:"태국 군용기 대피, 인도 10편, UK/AU DNT + 대피 계획.",srcCount:5,cv:true},
+];
+
+const HYPOTHESES=[
+{id:"H0",name:"정상",score:0.215,color:"#22c55e"},
+{id:"H1",name:"악화",score:0.608,color:"#f59e0b"},
+{id:"H2",name:"철수준비",score:0.798,color:"#ef4444"},
+];
+const HYPOTHESIS_COLOR={H0:"#22c55e",H1:"#f59e0b",H2:"#ef4444"};
+
+const ROUTES=[
+{id:"A",name:"Al Ain → Buraimi → Sohar",base_h:7.0,status:"CAUTION",cong:0.90,
+ note:"Al Ain 국경 혼잡 심화. 통과 가능하나 지연 예상. effective ~13.3h.",
+ newsRefs:[
+   {src:"The National",text:"UAE 거주자 이란 피격 여파로 28시간 우회 귀환 — 육로 혼잡 가중",ts:"2026-03-04"},
+   {src:"BBC / Google News",text:"미국 중동 자국민 긴급 소개 항공편 투입 — 육로 국경 대기 악화 예상",ts:"2026-03-04"},
+ ]},
+{id:"B",name:"Mezyad → Nizwa",base_h:8.2,status:"CAUTION",cong:0.60,
+ note:"국경 기능 유지 중이나 이란 공습 여파로 대기 시간 증가. effective ~13.1h.",
+ newsRefs:[
+   {src:"The National",text:"이란 공습으로 UAE 전반 여행 차질 — 육로 국경 혼잡도 상승",ts:"2026-03-04"},
+ ]},
+{id:"C",name:"Saudi Ghuwaifat → Riyadh",base_h:15.5,status:"BLOCKED",cong:0.65,
+ note:"쿠웨이트 드론 피격·걸프 왕정 압박 — 사우디 경유 위험. 사용 금지.",
+ newsRefs:[
+   {src:"BBC",text:"쿠웨이트 드론 공격으로 미군 첫 전사 — 걸프 전역 확전 신호",ts:"2026-03-04"},
+   {src:"Carnegie / Google News",text:"걸프 왕정 이란-미 딜레마 — 사우디 보복 대상 가능성 경고",ts:"2026-03-04"},
+ ]},
+{id:"D",name:"Fujairah → Khatmat Malaha → Muscat",base_h:9.3,status:"BLOCKED",cong:0.35,
+ note:"Hormuz 긴장으로 유가 급등·항만 운영 제한. 동해안 루트 차단 상태.",
+ newsRefs:[
+   {src:"BBC",text:"국제유가·가스 급등 — Strait of Hormuz 봉쇄 우려 직접 반영",ts:"2026-03-04"},
+   {src:"Al Jazeera",text:"바그다드 공항 인근 폭발 — 걸프 항만·항공 연쇄 차질 패턴",ts:"2026-03-04"},
+ ]},
+];
+
+const CL_INIT=[
+{id:1,text:"Bug-out bag (여권/ID/현금USD+AED/물2L/비상식량)",done:false},
+{id:2,text:"차량 연료 Full 확인",done:false},
+{id:3,text:"오만 보험 Orange Card 사전 구매",done:false},
+{id:4,text:"대사관 긴급번호 저장 — KR: +971-2-643-8700",done:false},
+{id:5,text:"Al Ain/Buraimi 루트 GPS 오프라인 맵",done:false},
+{id:6,text:"가족/회사(SCT) 비상연락 완료",done:false},
+{id:7,text:"15분마다 대사관/Etihad/BBC 확인",done:false},
+{id:8,text:"SMS 공습경보 수신 확인",done:false},
+{id:9,text:"창문 회피 안전구역(내벽) 확보",done:false},
+{id:10,text:"NetherlandsWorldwide 정보서비스 등록",done:false},
+];
+
+const FALLBACK_DASHBOARD={
+  intelFeed:INTEL_FEED,
+  indicators:INDICATORS,
+  hypotheses:HYPOTHESES,
+  routes:ROUTES,
+  checklist:CL_INIT,
+  metadata:{egressLossETA:2},
+};
+const INITIAL_DASHBOARD=normalizeDashboard(FALLBACK_DASHBOARD)||FALLBACK_DASHBOARD;
+const SNAPSHOT_REQUIRED_KEYS=["intel_feed","indicators","hypotheses","routes","checklist"];
+const DASHBOARD_CANDIDATES=[
+  "/api/state",
+  "../api/state",
+  "api/state",
+  "https://raw.githubusercontent.com/macho715/iran-war-notelm/urgentdash-live/live/hyie_state.json",
+  "./data/dashboard.json",
+];
+
+const MIN_EVIDENCE_SOURCES=2;
+const FALLBACK_EGRESS_LOSS_ETA=2;
+
+function toTsIso(value){
+  if(!value) return "";
+  const text=String(value || "").trim();
+  const m=text.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/i);
+  const monthMap={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  const d = m && monthMap[m[1].toLowerCase()] !== undefined
+    ? new Date(new Date().getFullYear(), monthMap[m[1].toLowerCase()], Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5] || "0"), 0)
+    : new Date(text);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
+function splitSources(raw=""){
+  return [...new Set(
+    raw
+      .split(/\/|,/)
+      .map((s)=>s.trim())
+      .filter(Boolean)
+      .map((s)=>s.replace(/\s+\(.*?\)$/,"").trim())
+      .filter(Boolean)
+  )];
+}
+
+function inferEvidenceFromSource(raw){
+  const sources=splitSources(raw);
+  const sourceCount=Math.max(sources.length,0);
+  return {sourceCount,verified:sourceCount>=MIN_EVIDENCE_SOURCES};
+}
+
+function summarizeSourceHealth(raw){
+  if(!raw||typeof raw!=="object") return {ok:null,total:null};
+  const rows=Object.values(raw);
+  if(!rows.length) return {ok:null,total:null};
+  const ok=rows.filter((r)=>Boolean(r&&r.ok)).length;
+  return {ok,total:rows.length};
+}
+
+function normalizeConflictStats(raw={}){
+  const toInt=(v)=>{
+    const n=Number(v);
+    return Number.isFinite(n)&&n>=0?Math.trunc(n):null;
+  };
+  const startDate=String(raw?.conflict_start_date||"2026-02-28").trim()||"2026-02-28";
+  return {
+    missiles_total: toInt(raw?.missiles_total),
+    missiles_intercepted: toInt(raw?.missiles_intercepted),
+    drones_total: toInt(raw?.drones_total),
+    drones_destroyed: toInt(raw?.drones_destroyed),
+    casualties_kia: toInt(raw?.casualties_kia),
+    casualties_wia: toInt(raw?.casualties_wia),
+    conflict_start_date: startDate,
+    conflict_day: toInt(raw?.conflict_day),
+    source: String(raw?.source||"fallback"),
+    updated_at: String(raw?.updated_at||""),
+  };
+}
+
+function normalizeIntelFeedItem(raw={}) {
+  const tsIso = toTsIso(raw.tsIso || raw.ts);
+  const evidence = inferEvidenceFromSource(raw.src || "");
+  const sourceCount = Number.isFinite(raw.sourceCount) && raw.sourceCount > 0 ? raw.sourceCount : evidence.sourceCount;
+  return {
+    ...raw,
+    tsIso,
+    ts: tsIso ? tsIso.slice(0,16).replace("T"," ") : raw.ts || "",
+    text: String(raw.text || "").trim(),
+    src: String(raw.src || ""),
+    verified: evidence.verified,
+    sourceCount: Math.max(sourceCount || 0, 0),
+  };
+}
+
+function normalizeIndicatorItem(raw={}) {
+  const tsIso = toTsIso(raw.tsIso || raw.ts);
+  const evidence = inferEvidenceFromSource(raw.src || "");
+  const srcCount = Number.isFinite(raw.srcCount) && raw.srcCount > 0 ? raw.srcCount : evidence.sourceCount;
+  return {
+    ...raw,
+    tsIso,
+    ts: tsIso ? tsIso.slice(0,16).replace("T"," ") : raw.ts || "",
+    srcCount: Math.max(srcCount, 0),
+    cv: srcCount >= MIN_EVIDENCE_SOURCES,
+    verified: srcCount >= MIN_EVIDENCE_SOURCES,
+  };
+}
+
+function normalizeMetadata(raw={}) {
+  const n = Number(raw.egressLossETA);
+  const egressLossETA = Number.isFinite(n) && n >= 0 ? n : FALLBACK_EGRESS_LOSS_ETA;
+  const evidenceConf = typeof raw.evidenceConf==="number"&&Number.isFinite(raw.evidenceConf)?raw.evidenceConf:null;
+  const effectiveThreshold = typeof raw.effectiveThreshold==="number"&&Number.isFinite(raw.effectiveThreshold)?raw.effectiveThreshold:null;
+  const deltaScore = typeof raw.deltaScore==="number"&&Number.isFinite(raw.deltaScore)?raw.deltaScore:null;
+  const urgency = typeof raw.urgency==="number"&&Number.isFinite(raw.urgency)?raw.urgency:null;
+  const sourceOk = typeof raw.sourceOk==="number"&&Number.isFinite(raw.sourceOk)?raw.sourceOk:null;
+  const sourceTotal = typeof raw.sourceTotal==="number"&&Number.isFinite(raw.sourceTotal)?raw.sourceTotal:null;
+  const triggers = raw.triggers&&typeof raw.triggers==="object"?raw.triggers:{};
+  const conflictStats = normalizeConflictStats(raw.conflictStats || {});
+  return {
+    egressLossETA,
+    evidenceConf,
+    effectiveThreshold,
+    deltaScore,
+    urgency,
+    stateTs: raw.stateTs?String(raw.stateTs):"",
+    source: raw.source?String(raw.source):"",
+    status: raw.status?String(raw.status):"",
+    degraded: Boolean(raw.degraded),
+    sourceOk,
+    sourceTotal,
+    triggers,
+    conflictStats,
+  };
+}
+
+function normalizeHypothesisItem(raw={}){
+  const id=String(raw.id||"");
+  const score=Number(raw.score);
+  return {
+    ...raw,
+    id: id || "H?",
+    score: Number.isFinite(score)?score:0,
+    color: String(raw.color||HYPOTHESIS_COLOR[id]||"#38bdf8"),
+    name: String(raw.name||id||"Unknown"),
+  };
+}
+
+function normalizeDashboard(payload){
+  if(!payload||typeof payload!=="object") return null;
+  const {intelFeed,indicators,hypotheses,routes,checklist}=payload;
+  if(!Array.isArray(intelFeed)||!Array.isArray(indicators)||!Array.isArray(hypotheses)||!Array.isArray(routes)||!Array.isArray(checklist)) return null;
+  return {
+    intelFeed:intelFeed.map(normalizeIntelFeedItem),
+    indicators:indicators.map(normalizeIndicatorItem),
+    hypotheses:hypotheses.map(normalizeHypothesisItem),
+    routes,
+    checklist,
+    metadata: normalizeMetadata(payload.metadata || {}),
+  };
+}
+
+function hasSnapshotShape(obj){
+  return obj && typeof obj==="object" && SNAPSHOT_REQUIRED_KEYS.every((k)=>Object.prototype.hasOwnProperty.call(obj,k));
+}
+
+function snapshotToDashboard(snapshot){
+  const health = summarizeSourceHealth(snapshot.source_health);
+  return {
+    intelFeed: Array.isArray(snapshot.intel_feed) ? snapshot.intel_feed : [],
+    indicators: Array.isArray(snapshot.indicators)
+      ? snapshot.indicators.map((row)=>({
+          ...row,
+          srcCount: Number.isFinite(row?.srcCount) ? row.srcCount : Number(row?.src_count ?? 0),
+        }))
+      : [],
+    hypotheses: Array.isArray(snapshot.hypotheses) ? snapshot.hypotheses.map(normalizeHypothesisItem) : [],
+    routes: Array.isArray(snapshot.routes) ? snapshot.routes : [],
+    checklist: Array.isArray(snapshot.checklist) ? snapshot.checklist : [],
+    metadata: {
+      egressLossETA: clampEgress(snapshot.egress_loss_eta),
+      evidenceConf: snapshot.evidence_conf,
+      effectiveThreshold: snapshot.effective_threshold,
+      deltaScore: snapshot.delta_score,
+      urgency: snapshot.urgency,
+      stateTs: snapshot.state_ts || snapshot.snapshot_ts || "",
+      source: snapshot.source || "",
+      status: snapshot.status || "",
+      degraded: Boolean(snapshot.degraded),
+      sourceOk: health.ok,
+      sourceTotal: health.total,
+      triggers: snapshot.triggers || {},
+      conflictStats: normalizeConflictStats(snapshot.conflict_stats || {}),
+    },
+  };
+}
+
+function normalizeIncomingPayload(payload){
+  if(hasSnapshotShape(payload)) return normalizeDashboard(snapshotToDashboard(payload));
+  return normalizeDashboard(payload);
+}
+function clampEgress(value){
+  const n=Number(value);
+  return Number.isFinite(n)&&n>=0?n:FALLBACK_EGRESS_LOSS_ETA;
+}
+
+const pC={CRITICAL:"#ef4444",HIGH:"#f59e0b",MEDIUM:"#3b82f6"};
+
+function Pulse({color}){
+  const[o,sO]=useState(1);
+  useEffect(()=>{const i=setInterval(()=>sO(v=>v===1?0.3:1),800);return()=>clearInterval(i)},[]);
+  return <span style={{display:"inline-block",width:10,height:10,borderRadius:"50%",backgroundColor:color,opacity:o,transition:"opacity 0.4s"}}/>;
+}
+
+function Bar({value,max=1,color,h=8}){
+  return <div style={{width:"100%",height:h,background:"#1e293b",borderRadius:h/2,overflow:"hidden"}}>
+    <div style={{width:`${Math.min(value/max*100,100)}%`,height:"100%",background:color,borderRadius:h/2,transition:"width 0.6s"}}/>
+  </div>;
+}
+
+function Gauge({value,color,label,sub}){
+  const gaugeColor=color||HYPOTHESIS_COLOR[String(label||"")]||"#38bdf8";
+  const p=Math.min(value,1),a=p*180,r=35,cx=45,cy=50;
+  const rad=d=>(d*Math.PI)/180;
+  const ea=180-a,x2=cx+r*Math.cos(rad(ea)),y2=cy-r*Math.sin(rad(ea));
+  return <div style={{textAlign:"center"}}>
+    <svg width={90} height={65} viewBox="0 0 90 65">
+      <path d={`M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}`} fill="none" stroke="#1e293b" strokeWidth={5} strokeLinecap="round"/>
+      {p>0&&<path d={`M ${cx-r} ${cy} A ${r} ${r} 0 ${a>180?1:0} 1 ${x2} ${y2}`} fill="none" stroke={gaugeColor} strokeWidth={5} strokeLinecap="round"/>}
+      <text x={cx} y={cy-8} textAnchor="middle" fill={gaugeColor} fontSize={18} fontWeight={800} fontFamily="monospace">{value.toFixed(3)}</text>
+      <text x={cx} y={cy+6} textAnchor="middle" fill="#94a3b8" fontSize={11}>{label}</text>
+    </svg>
+    {sub&&<div style={{fontSize:12,color:"#64748b",marginTop:-4}}>{sub}</div>}
+  </div>;
+}
+
+function App(){
+  const[now,sN]=useState(new Date());
+  const[cl,sCl]=useState(CL_INIT);
+  const[tab,sT]=useState("overview");
+  const[ne,sNe]=useState(900);
+  const[ff,sFF]=useState("ALL");
+  const[dash,sDash]=useState(INITIAL_DASHBOARD);
+  const[egressLossETA,sELA]=useState(INITIAL_DASHBOARD?.metadata?.egressLossETA ?? FALLBACK_EGRESS_LOSS_ETA);
+  const[loading,sLoading]=useState(true);
+  const[error,sError]=useState(null);
+  const[lastUpdated,sLastUpdated]=useState(null);
+  const mounted=useRef(true);
+  const synced=useRef(false);
+
+  const mergeChecklist=(payloadChecklist,prevChecklist)=>{
+    return payloadChecklist.map(item=>{
+      const prev=prevChecklist.find(p=>p.id===item.id);
+      return prev?{...item,done:prev.done}:item;
+    });
+  };
+
+  const applyDashboard=useCallback((next)=>{
+    sDash(next);
+    sCl(prev=>mergeChecklist(next.checklist,prev));
+    sELA(clampEgress(next?.metadata?.egressLossETA));
+    synced.current=true;
+  },[]);
+
+  const fetchDashboard=useCallback(async(showLoading=false)=>{
+    if(showLoading) sLoading(true);
+    try{
+      let normalized=null;
+      for(const candidate of DASHBOARD_CANDIDATES){
+        try{
+          const sep = candidate.includes("?") ? "&" : "?";
+          const r=await fetch(`${candidate}${sep}t=${Date.now()}`,{cache:"no-store"});
+          if(!r.ok) continue;
+          const payload=await r.json();
+          normalized=normalizeIncomingPayload(payload);
+          if(normalized&&normalized.metadata){
+            normalized.metadata.source=candidate;
+          }
+          if(normalized) break;
+        }catch{
+          // try next candidate
+        }
+      }
+      if(!normalized) throw new Error("Invalid payload");
+      if(!mounted.current) return;
+      applyDashboard(normalized);
+      if(Number.isFinite(normalized?.metadata?.egressLossETA)){
+        sELA(normalized.metadata.egressLossETA);
+      }
+      sError(null);
+      sLastUpdated(new Date());
+    }catch(err){
+      if(!mounted.current) return;
+      if(!synced.current){
+        applyDashboard(INITIAL_DASHBOARD);
+      }
+      sError("데이터를 불러오지 못했습니다. 기본 데이터를 표시합니다.");
+    }finally{
+      if(showLoading && mounted.current) sLoading(false);
+    }
+  },[applyDashboard]);
+
+  useEffect(()=>{
+    if(typeof window === "undefined") return;
+    const v=Number(window.localStorage.getItem("urgentdash.egressLossETA"));
+    if(Number.isFinite(v) && v>=0){
+      sELA(v);
+    }
+  },[]);
+
+  useEffect(()=>{
+    if(typeof window === "undefined") return;
+    window.localStorage.setItem("urgentdash.egressLossETA", String(Number.isFinite(egressLossETA)?egressLossETA:FALLBACK_EGRESS_LOSS_ETA));
+  },[egressLossETA]);
+
+  useEffect(()=>{
+    const t=setInterval(()=>{sN(new Date());sNe(p=>p<=0?900:p-1)},1000);
+    return()=>{
+      mounted.current=false;
+      clearInterval(t);
+    };
+  },[]);
+
+  useEffect(()=>{
+    mounted.current=true;
+    fetchDashboard(true);
+    const intervalMs=15*60*1000;
+    const id=setInterval(()=>fetchDashboard(false),intervalMs);
+    return ()=>clearInterval(id);
+  },[fetchDashboard]);
+
+  const tog=useCallback(id=>sCl(p=>p.map(c=>c.id===id?{...c,done:!c.done}:c)),[]);
+  const cc=cl.filter(c=>c.done).length;
+  const evidenceFloorT0 = dash.indicators.filter(i=>i.tier==="TIER0"&&i.cv).length;
+  const hypothesesSorted=[...dash.hypotheses].sort((a,b)=>(Number(b?.score)||0)-(Number(a?.score)||0));
+  const leadingHypothesis=hypothesesSorted[0]||{id:"H?",name:"Unknown",score:0};
+  const leadingColor=leadingHypothesis.id==="H2"?"#ef4444":leadingHypothesis.id==="H1"?"#f59e0b":"#22c55e";
+  const dsFromMeta=dash?.metadata?.deltaScore;
+  const ds=typeof dsFromMeta==="number"&&Number.isFinite(dsFromMeta)
+    ? dsFromMeta
+    : (dash.hypotheses[2]?.score||0)-(dash.hypotheses[1]?.score||0);
+  const ecFromMeta=dash?.metadata?.evidenceConf;
+  const ec=typeof ecFromMeta==="number"&&Number.isFinite(ecFromMeta)?ecFromMeta:0;
+  const thresholdFromMeta=dash?.metadata?.effectiveThreshold;
+  const effectiveThreshold=typeof thresholdFromMeta==="number"&&Number.isFinite(thresholdFromMeta)?thresholdFromMeta:0.80;
+  const urgencyFromMeta=dash?.metadata?.urgency;
+  const egress=Number.isFinite(egressLossETA)?egressLossETA:FALLBACK_EGRESS_LOSS_ETA;
+  const urgencyScore=typeof urgencyFromMeta==="number"&&Number.isFinite(urgencyFromMeta)
+    ? urgencyFromMeta
+    : Math.min(1,Math.max(0,1 - egress / 12));
+  const safeEgressLabel=Number.isFinite(egress)?`${egress.toFixed(2)}h`:"미입력";
+  const confBand=ec>=0.8?"HIGH":ec>=0.6?"MEDIUM-HIGH":ec>=0.4?"MEDIUM":"LOW";
+  const sourceOk=dash?.metadata?.sourceOk;
+  const sourceTotal=dash?.metadata?.sourceTotal;
+  const liveSource=dash?.metadata?.source||"n/a";
+  const sourceHealthLabel=(typeof sourceOk==="number"&&Number.isFinite(sourceOk)&&typeof sourceTotal==="number"&&Number.isFinite(sourceTotal))
+    ? `${sourceOk}/${sourceTotal} ok`
+    : "n/a";
+  const stateTsLabel=dash?.metadata?.stateTs||"n/a";
+  const statusLabel=dash?.metadata?.status?String(dash.metadata.status).toUpperCase():"n/a";
+  const degradedLabel=dash?.metadata?.degraded?"true":"false";
+  const dsGap=0.20-ds;
+  const dsGapLabel=ds>=0.20?`ΔScore 임계 초과 +${Math.abs(dsGap).toFixed(3)}`:`0.20까지 ${Math.abs(dsGap).toFixed(3)} 차이`;
+  const dsStateIcon=ds>=0.20?"✅":"⚠";
+  const dsActionLabel=ds>=0.20?"RED_PREP 조건 충족(유지)":"추가 에스컬레이션 시 RED_PREP 전환";
+  const confDelta=ec-effectiveThreshold;
+  const confDeltaLabel=ec>=effectiveThreshold
+    ? `Conf ${ec.toFixed(3)} ≥ ${effectiveThreshold.toFixed(3)} → RED 조건 충족`
+    : `Conf ${ec.toFixed(3)} < ${effectiveThreshold.toFixed(3)} → RED 미충족 (${Math.abs(confDelta).toFixed(3)} 차이)`;
+  const dsEscalationLabel=ds>=0.20
+    ? `ΔScore ≥ 0.20 돌파 (현재 +${(ds-0.20).toFixed(3)})`
+    : `ΔScore ≥ 0.20 돌파 (현재 ${Math.abs(0.20-ds).toFixed(3)} 차이)`;
+  const bf=2.0;
+  const fmt=s=>`${Math.floor(s/60).toString().padStart(2,"0")}:${(s%60).toString().padStart(2,"0")}`;
+  const fFeed=ff==="ALL"?dash.intelFeed:dash.intelFeed.filter(f=>f.priority===ff);
+  const tabs=[{id:"overview",l:"Overview",i:"📊"},{id:"intel",l:"Intel Feed",i:"🔴"},{id:"indicators",l:"Indicators",i:"📡"},{id:"routes",l:"Routes",i:"🛣️"},{id:"checklist",l:"Checklist",i:"✅"}];
+  const updateTs=lastUpdated
+    ? lastUpdated.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})
+    : "—";
+  const formatFeedTs=(item)=>{
+    const raw=item?.tsIso || item?.ts;
+    const d=raw?new Date(raw):null;
+    if(!d||Number.isNaN(d.getTime())) return item?.ts || "—";
+    return d.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"Asia/Dubai"});
+  };
+  const findIndicator=(id)=>dash.indicators.find((row)=>row.id===id)||{};
+  const i01=findIndicator("I01");
+  const i02=findIndicator("I02");
+  const i03=findIndicator("I03");
+  const i04=findIndicator("I04");
+  const triggers=dash?.metadata?.triggers||{};
+  const liveDegraded=Boolean(dash?.metadata?.degraded);
+  const conflictStats=normalizeConflictStats(dash?.metadata?.conflictStats||{});
+  const gateStay=(Number(i01?.state)||0)>=0.7 || Boolean(triggers.kr_leave_immediately);
+  const gateStrike=Boolean(triggers.strike_detected) || (Number(i03?.state)||0)>=0.7;
+  const gateRoad=Boolean(triggers.border_change) || (Number(i04?.state)||0)>=0.6;
+  const gateActiveCount=[gateStay,gateStrike,gateRoad].filter(Boolean).length;
+  const gateState=gateActiveCount>=2?"BLOCKED":gateActiveCount===1?"CAUTION":"OPEN";
+  const modeState=liveDegraded?"DEGRADED":(Boolean(triggers.red_imminent)||ds>=0.2?"RED_PREP":"AMBER");
+  const modeColor=modeState==="DEGRADED"?"#ef4444":modeState==="RED_PREP"?"#f59e0b":"#22c55e";
+  const evidenceState=ec>=effectiveThreshold?"PASSED":"WATCH";
+  const airspaceState=(Number(i02?.state)||0)>=0.8?"CLOSED":(Number(i02?.state)||0)>=0.5?"DISRUPTED":"OPEN";
+  const airspaceHint=String(i02?.detail||"").slice(0,42);
+  const h2Score=Number(dash.hypotheses.find((row)=>row.id==="H2")?.score||0);
+  const likelihoodLabel=h2Score>=0.8?"HIGHLY LIKELY":h2Score>=0.55?"LIKELY":h2Score>=0.35?"POSSIBLE":"UNLIKELY";
+  const likelihoodBand=h2Score>=0.8?">=80%":h2Score>=0.55?"55-80%":h2Score>=0.35?"35-55%":"<35%";
+  const likelihoodBasis=`H2 ${h2Score.toFixed(3)} / ΔScore ${ds.toFixed(3)} / Conf ${ec.toFixed(3)}`;
+  const conflictDayLabel=Number.isFinite(conflictStats.conflict_day)?`Day ${conflictStats.conflict_day}`:"n/a";
+  const stat=(value,suffix="")=>Number.isFinite(value)?`${value}${suffix}`:"n/a";
+  const escalationItems=[
+    {text:"한국 대사관 'Leave immediately' 발령",active:Boolean(triggers.kr_leave_immediately),note:`현재: ${Boolean(triggers.kr_leave_immediately)?"감지됨":"미감지"}`},
+    {text:"미국 Level 4 Do Not Travel 격상",active:(Number(i01?.state)||0)>=0.95,note:`I01 state=${(Number(i01?.state)||0).toFixed(2)}`},
+    {text:"국경 RESTRICTED/CLOSED 감지",active:Boolean(triggers.border_change),note:`I04 state=${(Number(i04?.state)||0).toFixed(2)}`},
+    {text:dsEscalationLabel,active:ds>=0.20,note:`threshold=0.20`},
+    {text:"추가 대규모 strike 감지",active:Boolean(triggers.strike_detected),note:`trigger=${Boolean(triggers.strike_detected)}`},
+  ];
+  const deEscalationItems=[
+    {text:"영공 재개 + 항공 정상화",ok:airspaceState==="OPEN",note:airspaceHint||"I02 detail n/a"},
+    {text:"strike window 해제",ok:!gateStrike,note:`strike=${gateStrike?"active":"clear"}`},
+    {text:"국경 통제 해제",ok:!gateRoad,note:`border=${gateRoad?"restricted":"clear"}`},
+    {text:"Evidence 대비 Threshold 하향 안정",ok:ec<effectiveThreshold&&ds<0.20,note:`confΔ=${(ec-effectiveThreshold).toFixed(3)}`},
+  ];
+
+  return <div style={{minHeight:"100vh",background:"#020617",color:"#e2e8f0",fontFamily:"'Inter',-apple-system,sans-serif",padding:12,maxWidth:920,margin:"0 auto"}}>
+    {/* HEADER */}
+    <div style={{background:"linear-gradient(135deg,#0f172a,#1e1b4b)",borderRadius:16,padding:"16px 20px",marginBottom:12,border:"1px solid #1e293b"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+        <div>
+          <div style={{fontSize:12,color:"#64748b",letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>HyIE-ERC² Personal I&W System · LIVE INTELLIGENCE</div>
+          <div style={{fontSize:24,fontWeight:800,background:"linear-gradient(90deg,#f59e0b,#fbbf24)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>v2026.05 — SHELTER MODE</div>
+          <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>{`Iran-UAE Conflict ${conflictDayLabel} · ${conflictStats.conflict_start_date} – ongoing · source ${conflictStats.source}`}</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:13,color:"#64748b"}}>Abu Dhabi, UAE (GST +4)</div>
+          <div style={{fontSize:15,fontFamily:"monospace",color:"#94a3b8"}}>{now.toISOString().slice(0,10)} {now.toTimeString().slice(0,8)}</div>
+          <div style={{fontSize:13,color:"#64748b",marginTop:2}}>마지막 갱신: {updateTs}</div>
+          {loading&&<div style={{fontSize:13,color:"#22c55e",marginTop:2}}>데이터 로드 중…</div>}
+          {error&&<div style={{fontSize:13,color:"#fca5a5",marginTop:2}}>{error}</div>}
+          <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"flex-end",marginTop:4}}>
+            <Pulse color="#f59e0b"/>
+            <span style={{fontSize:13,color:"#f59e0b"}}>다음 평가: {fmt(ne)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* ALERT BANNER */}
+    <div style={{background:"rgba(245,158,11,0.08)",border:"2px solid #f59e0b",borderRadius:12,padding:"14px 20px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <div style={{width:48,height:48,borderRadius:12,background:"linear-gradient(135deg,#f59e0b,#d97706)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:900,color:"#000"}}>⚠</div>
+        <div>
+          <div style={{fontSize:22,fontWeight:800,color:modeColor}}>{modeState==="RED_PREP"?"AMBER → RED_PREP 접근 중":modeState==="DEGRADED"?"DEGRADED 모니터링":"AMBER 모니터링"}</div>
+          <div style={{fontSize:14,color:"#fbbf24"}}>{`MODE: ${modeState} · 이동 제한 · Gate ${gateState}`}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {[{l:"Gate",v:gateState,c:gateState==="BLOCKED"?"#ef4444":gateState==="CAUTION"?"#f59e0b":"#22c55e"},{l:"Evidence",v:evidenceState,c:evidenceState==="PASSED"?"#22c55e":"#f59e0b"},{l:"Airspace",v:airspaceState,c:airspaceState==="OPEN"?"#22c55e":"#ef4444"},{l:"ΔScore",v:ds.toFixed(3),c:ds>=0.15?"#f59e0b":"#64748b"}].map((b,i)=>
+          <div key={i} style={{background:"#1e293b",borderRadius:8,padding:"5px 10px",textAlign:"center"}}>
+            <div style={{fontSize:11,color:"#64748b"}}>{b.l}</div>
+            <div style={{fontSize:14,fontWeight:700,color:b.c}}>{b.v}</div>
+          </div>
+        )}
+      </div>
+    </div>
+
+    {/* CONFLICT STATS */}
+    <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid #7f1d1d",borderRadius:10,padding:"10px 16px",marginBottom:12,fontSize:13,color:"#fca5a5",display:"flex",gap:16,flexWrap:"wrap",justifyContent:"center"}}>
+      <span>Missiles: <b>{stat(conflictStats.missiles_total)}</b> ({stat(conflictStats.missiles_intercepted," int.")})</span>
+      <span>Drones: <b>{stat(conflictStats.drones_total)}</b> ({stat(conflictStats.drones_destroyed," dest.")})</span>
+      <span>Casualties: <b>{stat(conflictStats.casualties_kia)} KIA / {stat(conflictStats.casualties_wia)} WIA</b></span>
+      <span>Duration: <b>{conflictDayLabel}</b></span>
+      <span>Sources: <b>{sourceHealthLabel}</b></span>
+    </div>
+
+    {/* TABS */}
+    <div style={{display:"flex",gap:4,marginBottom:12,overflowX:"auto",paddingBottom:4}}>
+      {tabs.map(t=><button key={t.id} onClick={()=>sT(t.id)} style={{background:tab===t.id?"#1e293b":"transparent",border:tab===t.id?"1px solid #334155":"1px solid transparent",borderRadius:8,padding:"8px 14px",color:tab===t.id?"#e2e8f0":"#64748b",fontSize:14,fontWeight:tab===t.id?700:500,cursor:"pointer",whiteSpace:"nowrap"}}>{t.i} {t.l}</button>)}
+    </div>
+
+    {/* OVERVIEW */}
+    {tab==="overview"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
+      {/* Hypotheses */}
+      <div style={{background:"#0f172a",border:"1px solid #334155",borderRadius:12,padding:16}}>
+        <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:12,letterSpacing:1}}>🧠 상황 시나리오 점수</div>
+        <div style={{display:"flex",justifyContent:"space-around",marginBottom:12}}>
+          {dash.hypotheses.map(h=><Gauge key={h.id} value={h.score} color={h.color} label={h.id} sub={h.name}/>)}
+        </div>
+        <div style={{background:"#1e293b",borderRadius:8,padding:10,fontSize:13}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{color:"#94a3b8"}}>Leading:</span><span style={{color:leadingColor,fontWeight:700}}>{leadingHypothesis.id} {leadingHypothesis.name} ({Number(leadingHypothesis.score||0).toFixed(3)})</span></div>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:"#94a3b8"}}>ΔScore:</span><span style={{color:"#f59e0b",fontWeight:700}}>{ds.toFixed(3)} (threshold: 0.20)</span></div>
+          <div style={{fontSize:12,color:"#fbbf24",marginTop:6,padding:"4px 8px",background:"rgba(245,158,11,0.1)",borderRadius:4}}>{`${dsStateIcon} ${dsGapLabel}. ${dsActionLabel}.`}</div>
+        </div>
+      </div>
+
+      {/* ICD 203 */}
+      <div style={{background:"#0f172a",border:"1px solid #334155",borderRadius:12,padding:16}}>
+        <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:12,letterSpacing:1}}>🔬 ICD 203 — CONFIDENCE / URGENCY</div>
+        <div style={{marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:"#94a3b8"}}>Evidence Confidence</span><span style={{fontSize:15,fontWeight:700,color:"#f59e0b"}}>{confBand} ({ec.toFixed(3)})</span></div>
+          <Bar value={ec} color="#f59e0b" h={10}/>
+          <div style={{fontSize:12,color:"#64748b",marginTop:4}}>{sourceHealthLabel} · TIER0 교차검증 {evidenceFloorT0}건</div>
+        </div>
+        <div style={{marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:"#94a3b8"}}>Urgency</span><span style={{fontSize:15,fontWeight:700,color:"#64748b"}}>{urgencyScore.toFixed(2)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:12,color:"#64748b"}}>EgressLossETA</span>
+            <span style={{fontSize:13,fontFamily:"monospace",color:"#f59e0b"}}>{safeEgressLabel}</span>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,justifyContent:"space-between"}}>
+            <input
+              type="number"
+              min="0"
+              step="0.25"
+              value={egressLossETA}
+              onChange={(e)=>{
+                const n=Number(e.target.value);
+                if(Number.isFinite(n)&&n>=0) sELA(n);
+              }}
+              style={{width:100,padding:"4px 6px",borderRadius:6,border:"1px solid #334155",background:"#0f172a",color:"#e2e8f0"}}
+            />
+            <span style={{fontSize:11,color:"#64748b"}}>입력값이 경보 계산에 반영됩니다.</span>
+          </div>
+          <Bar value={urgencyScore} color={urgencyScore>=0.5?"#22c55e":"#f59e0b"} h={10}/>
+          <div style={{fontSize:12,color:urgencyScore>=0.5?"#22c55e":"#ef4444",marginTop:4}}>
+            {urgencyScore>=0.5 ? "경보 위험도 상승 구간 충족" : "현재 위험도 낮음(입력값 기반)"} 
+          </div>
+        </div>
+        <div style={{background:"#1e293b",borderRadius:8,padding:10}}>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:4}}>Effective RED Threshold</div>
+          <div style={{display:"flex",alignItems:"baseline",gap:6}}><span style={{fontSize:22,fontWeight:800,color:"#e2e8f0",fontFamily:"monospace"}}>{effectiveThreshold.toFixed(3)}</span><span style={{fontSize:12,color:"#64748b"}}>(engine threshold)</span></div>
+          <div style={{fontSize:12,color:"#f59e0b",marginTop:4}}>{confDeltaLabel}</div>
+        </div>
+      </div>
+
+      {/* Movement Gate */}
+      <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:12,padding:16}}>
+        <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:12,letterSpacing:1}}>🚧 MOVEMENT RISK GATE</div>
+        {[{l:"Stay Indoors",a:gateStay,s:`I01=${(Number(i01?.state)||0).toFixed(2)} / kr_alert=${Boolean(triggers.kr_leave_immediately)}`},{l:"Active Strike Window",a:gateStrike,s:`I03=${(Number(i03?.state)||0).toFixed(2)} / strike=${Boolean(triggers.strike_detected)}`},{l:"Curfew/Roadblock",a:gateRoad,s:`I04=${(Number(i04?.state)||0).toFixed(2)} / border=${Boolean(triggers.border_change)}`}].map((g,i)=>
+          <div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,background:g.a?"rgba(239,68,68,0.08)":"rgba(34,197,94,0.05)",border:`1px solid ${g.a?"#7f1d1d":"#14532d"}`,borderRadius:8,padding:"8px 12px"}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:g.a?"#ef4444":"#22c55e",boxShadow:g.a?"0 0 8px #ef4444":"none"}}/>
+            <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:g.a?"#fca5a5":"#86efac"}}>{g.l}</div><div style={{fontSize:11,color:"#64748b"}}>{g.s}</div></div>
+            <span style={{fontSize:13,fontWeight:700,color:g.a?"#ef4444":"#22c55e"}}>{g.a?"ACTIVE":"CLEAR"}</span>
+          </div>
+        )}
+        <div style={{background:"#1e293b",borderRadius:8,padding:10,fontSize:13}}>
+          <div style={{color:gateState==="BLOCKED"?"#ef4444":gateState==="CAUTION"?"#f59e0b":"#22c55e",fontWeight:700,marginBottom:4}}>{`GATE ${gateState} (${gateActiveCount}/3)`}</div>
+          <div style={{color:"#94a3b8"}}>{gateState==="BLOCKED"?"RED_MOVE 차단 · RED_PREP만 허용":gateState==="CAUTION"?"조건부 이동 검토":"이동 게이트 해제 가능"}</div>
+        </div>
+      </div>
+
+      {/* Likelihood */}
+      <div style={{background:"#0f172a",border:"1px solid #334155",borderRadius:12,padding:16}}>
+        <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:12,letterSpacing:1}}>📈 가능성 (LIKELIHOOD)</div>
+        <div style={{textAlign:"center",padding:"8px 0 12px"}}><div style={{fontSize:30,fontWeight:800,color:likelihoodLabel==="HIGHLY LIKELY"?"#ef4444":likelihoodLabel==="LIKELY"?"#f59e0b":"#22c55e"}}>{likelihoodLabel}</div><div style={{fontSize:15,color:"#94a3b8"}}>{likelihoodBand}</div></div>
+        <div style={{background:"#1e293b",borderRadius:8,padding:12,fontSize:14,color:"#cbd5e1",lineHeight:1.6}}>{`현재 H2=${h2Score.toFixed(3)} 기반으로 ${likelihoodLabel} 구간입니다.`}</div>
+        <div style={{background:"rgba(245,158,11,0.08)",borderRadius:8,padding:10,marginTop:8,fontSize:13,color:"#fbbf24"}}>{`근거: ${likelihoodBasis}`}</div>
+      </div>
+
+      {/* Escalation */}
+      <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:12,padding:16}}>
+        <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:12}}>🔺 RED 전환 지표</div>
+        {escalationItems.map((item,i)=>
+          <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:8,lineHeight:1.4}}>
+            <span style={{color:item.active?"#ef4444":"#64748b",flexShrink:0,marginTop:2}}>{item.active?"▲":"•"}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{color:item.active?"#fca5a5":"#94a3b8",overflowWrap:"anywhere"}}>{item.text}</div>
+              <div style={{color:"#64748b",fontSize:12,marginTop:2,textAlign:"right",overflowWrap:"anywhere"}}>{item.note}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* De-escalation */}
+      <div style={{background:"#0f172a",border:"1px solid #22c55e",borderRadius:12,padding:16}}>
+        <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:12}}>🔽 GREEN 전환 지표</div>
+        {deEscalationItems.map((item,i)=>
+          <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:8,lineHeight:1.4}}>
+            <span style={{color:item.ok?"#22c55e":"#64748b",flexShrink:0,marginTop:2}}>{item.ok?"▼":"•"}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{color:item.ok?"#86efac":"#94a3b8",overflowWrap:"anywhere"}}>{item.text}</div>
+              <div style={{color:"#64748b",fontSize:12,marginTop:2,textAlign:"right",overflowWrap:"anywhere"}}>{item.note}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>}
+
+    {/* INTEL FEED */}
+    {tab==="intel"&&<div>
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        {["ALL","CRITICAL","HIGH","MEDIUM"].map(f=><button key={f} onClick={()=>sFF(f)} style={{background:ff===f?(pC[f]||"#334155"):"transparent",border:`1px solid ${ff===f?(pC[f]||"#334155"):"#1e293b"}`,borderRadius:6,padding:"4px 12px",fontSize:13,fontWeight:600,color:ff===f?"#fff":"#64748b",cursor:"pointer"}}>{f} {f!=="ALL"&&`(${dash.intelFeed.filter(i=>i.priority===f).length})`}</button>)}
+      </div>
+      {fFeed.map((item,i)=>
+        <div key={i} style={{background:"#0f172a",border:`1px solid ${item.priority==="CRITICAL"?"#7f1d1d":"#1e293b"}`,borderLeft:`3px solid ${pC[item.priority]}`,borderRadius:8,padding:"10px 14px",marginBottom:6}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:11,padding:"1px 6px",borderRadius:4,fontWeight:700,background:`${pC[item.priority]}20`,color:pC[item.priority]}}>{item.priority}</span>
+                <span style={{fontSize:12,color:"#64748b",fontFamily:"monospace"}}>{formatFeedTs(item)} GST</span>
+              </div>
+            {item.verified&&<span style={{fontSize:11,color:"#22c55e"}}>✓ verified</span>}
+          </div>
+          <div style={{fontSize:14,color:"#e2e8f0",fontWeight:600,marginBottom:4}}>{item.text}</div>
+          <div style={{fontSize:12,color:"#64748b",marginBottom:2}}>출처: {item.src}</div>
+          <div style={{fontSize:12,color:"#94a3b8",fontStyle:"italic"}}>영향: {item.impact}</div>
+        </div>
+      )}
+    </div>}
+
+    {/* INDICATORS */}
+    {tab==="indicators"&&<div>
+      {dash.indicators.map(ind=>
+        <div key={ind.id} style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"12px 16px",marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <div style={{minWidth:40,textAlign:"center",fontSize:14,fontWeight:800,fontFamily:"monospace",color:ind.state>=0.8?"#ef4444":ind.state>=0.4?"#f59e0b":"#22c55e"}}>{ind.id}</div>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:14,fontWeight:600,color:"#e2e8f0"}}>{ind.name}</span>
+                <span style={{fontSize:11,padding:"1px 6px",borderRadius:4,fontWeight:700,background:ind.tier==="TIER0"?"rgba(239,68,68,0.15)":ind.tier==="TIER1"?"rgba(245,158,11,0.15)":"rgba(100,116,139,0.15)",color:ind.tier==="TIER0"?"#fca5a5":ind.tier==="TIER1"?"#fcd34d":"#94a3b8"}}>{ind.tier}</span>
+                <span style={{fontSize:14,fontWeight:800,fontFamily:"monospace",color:ind.state>=0.8?"#ef4444":ind.state>=0.4?"#f59e0b":"#22c55e"}}>{ind.state.toFixed(2)}</span>
+              </div>
+            </div>
+            <span style={{fontSize:12,color:ind.cv?"#22c55e":"#f59e0b"}}>{ind.cv?"✓ 교차검증":"△ 부분"}</span>
+          </div>
+          <Bar value={ind.state} color={ind.state>=0.8?"#ef4444":ind.state>=0.4?"#f59e0b":"#22c55e"} h={6}/>
+          <div style={{fontSize:13,color:"#cbd5e1",marginTop:6}}>{ind.detail}</div>
+          <div style={{fontSize:12,color:"#64748b",marginTop:4}}>출처: {ind.src} · 최신: {formatFeedTs(ind)} · 소스 {Math.max(ind.srcCount||0,0)}건</div>
+        </div>
+      )}
+      <div style={{background:"#0f172a",border:"1px solid #334155",borderRadius:10,padding:14,marginTop:4}}>
+        <div style={{fontSize:14,fontWeight:700,color: evidenceFloorT0>=3?"#22c55e":"#f59e0b"}}>
+          {evidenceFloorT0>=3 ? "✅ Evidence Floor PASSED" : "⚠ Evidence Floor not reached"}
+          {` — TIER0 교차검증: ${evidenceFloorT0}건`}
+        </div>
+      </div>
+    </div>}
+
+    {/* ROUTES */}
+    {tab==="routes"&&<div>
+      {dash.routes.map(r=>{
+        const eff=r.base_h*(1+r.cong)*bf;
+        const isBlocked=r.status==="BLOCKED";
+        const isCaution=r.status==="CAUTION";
+        const borderColor=isBlocked?"#7f1d1d":isCaution?"#92400e":"#1e293b";
+        const badgeBg=isBlocked?"#7f1d1d":isCaution?"#92400e":"#14532d";
+        const statusColor=isBlocked?"#f87171":isCaution?"#f59e0b":"#22c55e";
+        return <div key={r.id} style={{background:"#0f172a",border:`1px solid ${borderColor}`,borderRadius:10,padding:16,marginBottom:10,opacity:isBlocked?0.82:1}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{width:28,height:28,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:badgeBg,fontSize:15,fontWeight:800,color:"#fff"}}>{r.id}</span>
+              <div>
+                <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0"}}>{r.name}</div>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <span style={{fontSize:12,color:statusColor,fontWeight:700}}>{r.status}</span>
+                  {isBlocked&&<span style={{fontSize:11,background:"#7f1d1d",color:"#fca5a5",padding:"1px 5px",borderRadius:3,fontWeight:700}}>⛔ 사용금지</span>}
+                </div>
+              </div>
+            </div>
+            <div style={{textAlign:"right"}}><div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:isBlocked?"#f87171":"#e2e8f0"}}>{isBlocked?"—":eff.toFixed(1)+"h"}</div><div style={{fontSize:12,color:"#64748b"}}>{isBlocked?"차단":"effective lead"}</div></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+            <div style={{background:"#1e293b",borderRadius:6,padding:8,textAlign:"center"}}><div style={{fontSize:12,color:"#64748b"}}>Base</div><div style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:"#94a3b8"}}>{r.base_h}h</div></div>
+            <div style={{background:"#1e293b",borderRadius:6,padding:8,textAlign:"center"}}><div style={{fontSize:12,color:"#64748b"}}>Congestion</div><div style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:r.cong>0.5?"#f87171":r.cong>0.3?"#f59e0b":"#94a3b8"}}>x{(1+r.cong).toFixed(2)}</div></div>
+            <div style={{background:"#1e293b",borderRadius:6,padding:8,textAlign:"center"}}><div style={{fontSize:12,color:"#64748b"}}>Buffer</div><div style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:"#f59e0b"}}>x{bf.toFixed(1)}</div></div>
+          </div>
+          <div style={{fontSize:12,color:"#94a3b8",background:"#0d1117",borderRadius:6,padding:8,marginBottom:r.newsRefs&&r.newsRefs.length?8:0}}>{r.note}</div>
+          {r.newsRefs&&r.newsRefs.length>0&&<div style={{background:"#0a0f1a",border:"1px solid #1e3a5f",borderRadius:6,padding:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+              <span style={{background:"#1e3a5f",color:"#60a5fa",fontSize:11,fontWeight:700,padding:"2px 6px",borderRadius:4}}>📰 뉴스 참조</span>
+              <span style={{fontSize:11,color:"#475569"}}>실시간 검증 미완료 — 공식 채널 교차확인 필요</span>
+            </div>
+            {r.newsRefs.map((ref,ri)=><div key={ri} style={{display:"flex",gap:6,marginTop:ri>0?4:0}}>
+              <span style={{fontSize:11,color:"#3b82f6",flexShrink:0,background:"rgba(59,130,246,0.1)",padding:"1px 5px",borderRadius:3}}>{ref.src}</span>
+              <span style={{fontSize:11,color:"#94a3b8"}}>{ref.text}</span>
+            </div>)}
+          </div>}
+        </div>
+      })}
+    </div>}
+
+    {/* CHECKLIST */}
+    {tab==="checklist"&&<div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}><div style={{fontSize:16,fontWeight:700,color:"#e2e8f0"}}>SHELTER 모드 — 즉시 준비</div><div style={{fontSize:14,color:cc===cl.length?"#22c55e":"#f59e0b"}}>{cc}/{cl.length}</div></div>
+      <Bar value={cc} max={cl.length} color={cc===cl.length?"#22c55e":"#f59e0b"} h={6}/>
+      <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:12}}>
+        {cl.map(c=><div key={c.id} onClick={()=>tog(c.id)} style={{display:"flex",alignItems:"center",gap:12,background:c.done?"rgba(34,197,94,0.05)":"#0f172a",border:`1px solid ${c.done?"#14532d":"#1e293b"}`,borderRadius:8,padding:"10px 14px",cursor:"pointer"}}>
+          <div style={{width:22,height:22,borderRadius:6,border:`2px solid ${c.done?"#22c55e":"#334155"}`,display:"flex",alignItems:"center",justifyContent:"center",background:c.done?"#22c55e":"transparent"}}>{c.done&&<span style={{color:"#000",fontSize:14,fontWeight:800}}>✓</span>}</div>
+          <span style={{fontSize:15,color:c.done?"#86efac":"#e2e8f0",textDecoration:c.done?"line-through":"none",opacity:c.done?0.7:1}}>{c.text}</span>
+        </div>)}
+      </div>
+    </div>}
+
+    {/* FOOTER */}
+    <div style={{marginTop:16,padding:"10px 16px",background:"#0f172a",borderRadius:10,border:"1px solid #1e293b",fontSize:12,color:"#475569"}}>
+      <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+        <span>HyIE-ERC² v2026.05 · ICD 203 · Samsung C&T Logistics</span>
+        <span>경보 시점 = 출구 상실 시점 − (대피 소요 × 버퍼)</span>
+      </div>
+      <div style={{marginTop:6,color:"#334155",fontSize:11}}>{`Source health: ${sourceHealthLabel} · state source: ${liveSource} · conflict_stats: ${conflictStats.source}`}</div>
+    </div>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
+
+

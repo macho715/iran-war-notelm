@@ -1,0 +1,51 @@
+name: Iran-UAE Monitor
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  run-monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Install Playwright browsers
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+          
+      - name: Run Scraper
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HEADLESS: "true"
+          LOG_LEVEL: "INFO"
+        run: |
+          # Since it's a cron job, we want it to run once and exit, not loop forever like APScheduler
+          # creating a simple executor for GitHub Actions run
+          echo "import asyncio" > run_once.py
+          echo "from main import hourly_job, initialize_logger" >> run_once.py
+          echo "async def run():" >> run_once.py
+          echo "    try:" >> run_once.py
+          echo "        await hourly_job()" >> run_once.py
+          echo "    except Exception as e:" >> run_once.py
+          echo "        print(f'Error: {e}')" >> run_once.py
+          echo "if __name__ == '__main__':" >> run_once.py
+          echo "    asyncio.run(run())" >> run_once.py
+          python run_once.py

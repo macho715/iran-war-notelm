@@ -1,0 +1,39 @@
+[project]
+name = "iran-war-uae-monitor"
+version = "2.0.4"
+description = "Iran-UAE real-time monitor (Phase 1+2 with A/B storage + Phase4 postgres option)"
+requires-python = ">=3.10"
+dependencies = [
+  "apscheduler",
+  "beautifulsoup4",
+  "fastapi",
+  "feedparser",
+  "httpx",
+  "notebooklm-mcp-cli",
+  "playwright",
+  "pydantic-settings",
+  "python-dotenv",
+  "python-telegram-bot",
+  "structlog",
+  "tenacity",
+  "twilio",
+  "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-asyncio",
+]
+cloud = [
+  "psycopg[binary]>=3.1.18",
+]
+
+[project.scripts]
+iran-monitor = "iran_monitor.app:run"
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100

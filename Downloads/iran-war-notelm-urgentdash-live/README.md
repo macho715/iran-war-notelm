@@ -1,0 +1,309 @@
+# 🚨 Iran-UAE 실시간 전황 모니터링 시스템
+
+> **실시간 이란-UAE 분쟁 뉴스를 자동 수집 → AI 분석 → WhatsApp/Telegram 브리핑**  
+> UAE 거주 교민·출장자·기업 보안팀을 위한 자동화 위기 모니터링 솔루션
+
+---
+
+## ⚠️ Canonical 프로젝트 경로 안내
+
+- 이 루트 프로젝트는 호환 래퍼를 포함한 상위 레이어입니다.
+- 실제 운영/개발/테스트 canonical 경로는 아래입니다.
+
+```text
+C:\Users\jichu\Downloads\iran-war-notelm-main
+```
+
+- 루트 `python main.py` 실행 시 canonical 프로젝트로 자동 위임됩니다.
+
+---
+
+## ✅ v2.0 통합 운영 기준
+
+- Canonical 실행 경로: `C:\Users\jichu\Downloads\iran-war-notelm-main`
+- Phase 1 + Phase 2가 `src/iran_monitor` 기반 런타임으로 통합됨 (RSS/Health/AI/출력 모두 canonical)
+- Phase 4 저장 체계: 기본 SQLite + `DATABASE_URL` 설정 시 Postgres SSOT
+- Dedup 정책: run-local MD5 해시 + DB(`articles.canonical_url`) 이중 필터
+- Option A(JSON 아카이브): `reports/{YYYY-MM-DD}/{HH-MM}.json` + `reports/{YYYY-MM-DD}.jsonl` 저장
+- 중첩 폴더 `iran-war-notelm-main\iran-war-notelm-main`는 실행 대상 아님
+- 관측성/안정성: APScheduler 이벤트 감시 + 헬스 API 확장(최근 실행 시각/에러/카운트)
+
+---
+
+## 🔄 시스템 전체 흐름
+
+```mermaid
+flowchart TD
+    A["⏰ APScheduler<br/>매 1시간 트리거"] --> B["🕷️ 스크래퍼 레이어<br/>asyncio.gather 병렬"]
+
+    B --> C["📰 UAE 언론 스크래퍼"]
+    B --> D["📱 SNS 스크래퍼"]
+
+    C --> C1[Gulf News]
+    C --> C2[Khaleej Times]
+    C --> C3[The National]
+    D --> D1[Facebook]
+    D --> D2[Instagram]
+
+    C1 & C2 & C3 & D1 & D2 --> E["🔁 중복 제거<br/>hash + DB(canonical_url)"]
+
+    E -->|새 기사| F["🤖 NotebookLM<br/>AI 분석 업로드"]
+    E -->|중복/없음| Z["⏭️ 스킵"]
+
+    F --> P2["🧠 Phase 2 AI<br/>위협 분석"]
+    P2 -->|HIGH/CRITICAL| ALERT["🚨 즉시 경보"]
+    P2 --> G["📝 Markdown 브리핑 생성"]
+    A --> J["🧪 스케줄러 이벤트 감시<br/>EVENT_JOB_ERROR/MISSED"]
+
+    G --> H["📡 Telegram<br/>개인 알림"]
+    G --> I["💬 WhatsApp<br/>Twilio 팀 전송"]
+
+    style A fill:#ff6b6b,color:#fff
+    style F fill:#4ecdc4,color:#fff
+    style P2 fill:#9b59b6,color:#fff
+    style H fill:#0088cc,color:#fff
+    style I fill:#25d366,color:#fff
+    style Z fill:#888,color:#fff
+    style J fill:#f39c12,color:#fff
+```
+
+---
+
+## ✨ 주요 기능
+
+| 기능 | 설명 |
+|---|---|
+| 🕷️ **투트랙 스크래퍼** | Playwright(JS 렌더링) + httpx(HTTP 직접 요청) 병렬 스크래핑 |
+| 🔁 **중복 제거** | in-process hash + DB(`canonical_url`) 이중 중복 필터 |
+| 🤖 **AI 분석** | Google NotebookLM 자동 업로드 + 소스 분석 |
+| 🧠 **Phase 2 AI 위협 평가** | NotebookLM query 기반 위협 분석, 실패 시 rule-based fallback |
+| 🚨 **HIGH/CRITICAL 즉시 경보** | 위협 레벨에 따른 조건부 즉시 Telegram 경보 |
+| 📊 **감성/도시별 리스크** | 긴급·일반·회복 감성, 아부다비/두바이 리스크 분석 |
+| 🧪 **관측성 가시성** | APScheduler `EVENT_JOB_ERROR/MISSED` 감시 로그 + `health` 응답 확장 |
+| 📰 **RSS 수집 안정화** | Gulf News(`/feed`) + Al Bawaba + BBC + AP(옵션) 집계 수집 |
+| ❤️ **헬스 상태 추적** | `.health_state.json` 업데이트 + `health.py` 상태 확인 API |
+| 💾 **Option A JSON 아카이브** | 매 사이클 기사/분석/NotebookLM URL을 `reports/`에 영구 저장 |
+| 📱 **WhatsApp 전송** | Twilio API로 팀원 전원에게 자동 발송 |
+| 📡 **Telegram 전송** | 개인 실시간 알림 |
+| ⏰ **자동 스케줄** | APScheduler 매 1시간 자동 실행 |
+| 🐳 **Docker 지원** | 컨테이너 배포 가능 |
+
+---
+
+## 🚀 빠른 시작
+
+### 1. 설치
+
+```bash
+git clone https://github.com/macho715/iran-war-notelm
+cd iran-war-notelm
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 2. 환경 변수 설정
+
+루트 경로에 `.env` 파일이 없다면 생성한 뒤, 아래 값을 채워주세요.
+
+```env
+# Telegram (필수)
+TELEGRAM_BOT_TOKEN=your_bot_token       # @BotFather에서 발급
+TELEGRAM_CHAT_ID=your_chat_id           # @userinfobot에서 확인
+
+# Twilio WhatsApp (팀 공유용)
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxx   # console.twilio.com
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxx
+TWILIO_WHATSAPP_FROM=+14155238886       # Sandbox 기본 번호
+WHATSAPP_RECIPIENTS=+971501234567,+821012345678
+
+# Option A JSON 아카이브
+REPORTS_ARCHIVE_ENABLED=true
+REPORTS_ARCHIVE_DIR=reports
+
+# Phase 4 (Runner + Postgres + Vercel)
+DATABASE_URL=<neon_dsn>
+STORAGE_BACKEND=postgres
+# Vercel Dashboard에서도 동일 DATABASE_URL을 사용해야 합니다.
+
+# Deep-Synth 관측성 옵션
+SCHEDULER_ALERT_ENABLED=false        # APScheduler JOB_ERROR/MISSED 이벤트 알림
+HEALTH_ALERT_ENABLED=false           # 파이프라인 실패 시 헬스 알림
+SCRAPER_TIMEOUT_MS=30000            # UAE/SNS Playwright 공통 timeout(ms)
+SCRAPER_WAIT_UNTIL=domcontentloaded  # Playwright waitUntil 정책
+```
+
+### 3. NotebookLM 로그인 (최초 1회)
+
+```bash
+nlm login
+```
+
+### 4. 실행
+
+#### 실행 경로 고정 (중요)
+
+```powershell
+cd C:\Users\jichu\Downloads\iran-war-notelm-main
+python scripts/check_runtime_paths.py
+```
+
+`canonical_root`, `main_file`, `rss_feed_file`가 모두 루트 프로젝트를 가리키는지 먼저 확인하세요.
+
+```bash
+python main.py        # 매시간 자동 실행
+python scripts/run_now.py  # 즉시 1회 실행 (테스트)
+python scripts/run_monitor.py   # 단일 인스턴스 락 가드 경로로 실행
+python -m pytest -q
+```
+
+### 5. Phase 4 운영 체인(권장)
+
+현재 운영 체인(권장):
+
+- Runner: GitHub Actions → `scripts/run_now.py --telegram-send`
+- Data plane: Neon/Postgres(`DATABASE_URL`) + 기존 JSON/JSONL 아카이브
+- Control plane: Vercel dashboard (`dashboard/`, root directory `dashboard`)
+- Vercel skip/build 판정: `dashboard/vercel.json` → `scripts/vercel-ignore-dashboard.sh` 사용
+  (`VERCEL_GIT_PREVIOUS_SHA..VERCEL_GIT_COMMIT_SHA` 전체 push 범위 기준)
+- 단일 인스턴스: `state/monitor.lock` 가드로 다중 실행 차단
+- 중복 억제: run-local hash + DB `articles.canonical_url`
+
+운영 점검 체크리스트:
+
+1. `workflow_dispatch` 1회 실행
+2. `runs`/`articles`/`outbox` DB 적재 확인
+3. `reports/YYYY-MM-DD/HH-00.json` + `reports/YYYY-MM-DD.jsonl` 생성 확인
+4. Vercel에서 최신 `run` 조회/표시 확인
+5. Telegram/WhatsApp 전송 실패 또는 승인 거절 시 outbox 저장 확인
+6. 신규 기사 유입 샘플(run1 `new_count=2`) 후 즉시 2회차 재실행(run2 `new_count=0`)으로 중복 전송 억제 확인
+7. `health` API 확인(`last_run_ts`, `counts`, `last_error`) 및 `EVENT_JOB_ERROR/MISSED` 로그 발생 억제/발생 규칙 검증
+
+---
+
+## 📁 프로젝트 구조
+
+```mermaid
+graph TD
+    Root["📁 iran-war-notelm/"]
+    Root --> Main["📄 main.py\n파이프라인 + 스케줄러"]
+    Root --> Reporter["📄 reporter.py\nTelegram + WhatsApp"]
+    Root --> Health["📄 health.py\n헬스 상태 API"]
+    Root --> Config["📄 config.py\n환경변수"]
+    Root --> Scrapers["📁 scrapers/"]
+    Root --> Scripts["📁 scripts/"]
+    Root --> Reports["📁 reports/\nOption A JSON 아카이브"]
+    Root --> Docs["📁 docs/"]
+    Root --> Agent["📁 .agent/skills/"]
+    Root --> Github["📁 .github/workflows/"]
+
+    Scrapers --> UAE["📄 uae_media.py\n투트랙 스크래퍼"]
+    Scrapers --> Social["📄 social_media.py\nSNS 스크래퍼"]
+    Scrapers --> RSS["📄 rss_feed.py\nRSS 집계 수집"]
+    Scripts --> PathDiag["📄 check_runtime_paths.py"]
+
+    Docs --> Arch["📄 ARCHITECTURE.md"]
+    Docs --> Layout["📄 LAYOUT.md"]
+    Docs --> CL["📄 CHANGELOG.md"]
+    Docs --> Runbooks["📄 runbooks/"]
+
+    style Root fill:#333,color:#fff
+    style Main fill:#e74c3c,color:#fff
+    style Reporter fill:#3498db,color:#fff
+    style UAE fill:#2ecc71,color:#fff
+```
+
+- **운영 Runbook:** NotebookLM MCP 사용(장애 시 요약, 인증 갱신 등)은 [docs/runbooks/NOTEBOOKLM_MCP_RUNBOOK.md](docs/runbooks/NOTEBOOKLM_MCP_RUNBOOK.md) 참고. Cursor MCP 설정은 [docs/CURSOR_MCP_SETUP.md](docs/CURSOR_MCP_SETUP.md) 참고.
+- **NotebookLM 사용 시:** 기여·개발 시 MCP 설정을 쓰려면 [docs/CURSOR_MCP_SETUP.md](docs/CURSOR_MCP_SETUP.md)를 참고한다. CI(GHA)에서는 Python API만 사용하며, MCP는 로컬/에이전트 전용이다.
+
+### 온디맨드 스크립트 (NotebookLM 보고·팟캐스트)
+
+로컬에서 이번 run 기준 **보고 요약** 또는 **팟캐스트/슬라이드**를 생성하려면:
+
+1. 사전: `pip install notebooklm-mcp-cli` 후 `nlm login` 1회 실행.
+2. 예시:
+   ```bash
+   python scripts/notebooklm_on_demand.py --action podcast [--notebook-id <ID>] [--dry-run]
+   python scripts/notebooklm_on_demand.py --action report --dry-run   # 호출 없이 검증만
+   ```
+3. `--dry-run`: 실제 NotebookLM 호출 없이 인자 검증만 수행.
+4. 실패 시: stderr 메시지 확인. `nlm login` 만료 또는 미설치 안내가 있으면 [docs/runbooks/NOTEBOOKLM_MCP_RUNBOOK.md](docs/runbooks/NOTEBOOKLM_MCP_RUNBOOK.md) 참고.
+
+---
+
+## 🌐 네트워크 요구사항
+
+```mermaid
+graph LR
+    PC["🖥️ PC / 서버"]
+
+    PC -->|"✅ UAE 허용"| GN["Gulf News\ngulfnews.com"]
+    PC -->|"✅ UAE 허용"| KT["Khaleej Times\nkhaleejtimes.com"]
+    PC -->|"✅ UAE 허용"| TN["The National\nthenationalnews.com"]
+    PC -->|"✅ UAE 허용"| TW["Twilio API\napi.twilio.com"]
+    PC -->|"❌ VPN 필요"| TG["Telegram\napi.telegram.org"]
+    PC -->|"❌ VPN 필요"| NLM["NotebookLM\nnotebooklm.google.com"]
+
+    style TG fill:#cc0000,color:#fff
+    style NLM fill:#cc0000,color:#fff
+    style TW fill:#009900,color:#fff
+```
+
+---
+
+## 🐳 Docker 배포
+
+```bash
+docker build -t iran-uae-monitor .
+docker run -d --env-file .env --name iran-uae-monitor iran-uae-monitor
+```
+
+---
+
+## 📊 보고 형식 예시
+
+```
+🚨 이란 전쟁 UAE 상황 실시간 보고 (2026-03-01 14:00)
+
+⚠️ 위협 레벨: HIGH | 감성: 긴급
+📍 아부다비: HIGH | 두바이: MEDIUM
+
+📍 1순위 (아부다비)
+• [The National] Zayed International Airport resumes limited operations
+• [Gulf News] Abu Dhabi civilian alert level reduced to yellow
+
+📍 2순위 (두바이)
+• [Khaleej Times] DXB Departures resume — 47 flights cancelled
+
+🛡️ 안전 메시지: Abu Dhabi / Dubai 체류자는 당국 지시를 따를 것
+
+🔗 출처 링크
+• https://thenationalnews.com/...
+```
+
+---
+
+## 📄 라이선스
+
+Internal Use Only — UAE 교민 안전 목적 비상업적 사용
+## NotebookLM 온디맨드/요약 재생성 (MCP 보조 경로)
+
+- 실행 정책: CI/GHA는 Python API만 사용하며, MCP는 로컬/에이전트 보조용입니다.
+- 온디맨드 실행 스크립트: `python scripts/notebooklm_on_demand.py`
+
+```bash
+# 이번 run 전체 소스 기준 요약(JSON/Markdown)
+python scripts/notebooklm_on_demand.py --action report --dry-run
+
+# 팟캐스트/슬라이드 생성 (실행)
+python scripts/notebooklm_on_demand.py --action podcast [--source-id <SOURCE_ID>]
+python scripts/notebooklm_on_demand.py --action slides [--source-id <SOURCE_ID>]
+
+# MCP 모드(로컬 nlm만 사용)
+python scripts/notebooklm_on_demand.py --action report --use-mcp --dry-run
+```
+
+- 반환 값은 JSON contract:
+  - `{"ok": true, "run_id": "...", "action": "...", "notebook_url": "..."}`
+  - 실패: `{"ok": false, "error": "..."}`
+- 대시보드 재생성 API: `POST /api/notebooklm/refresh`
+  - body: `{ "run_id": "...", "action": "report", "source_id": "...", "format": "json" }`
