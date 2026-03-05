@@ -58,6 +58,12 @@ def _read_default_notebook_id(root: Path) -> str | None:
         return None
 
 
+def _read_notebook_id_from_env() -> str | None:
+    """Return notebook ID from NOTEBOOKLM_NOTEBOOK_ID environment variable, if set."""
+    raw = os.environ.get("NOTEBOOKLM_NOTEBOOK_ID", "").strip()
+    return _to_notebook_id(raw) if raw else None
+
+
 def _to_notebook_id(raw: str | None) -> str | None:
     if not raw:
         return None
@@ -184,22 +190,28 @@ def main() -> int:
 
     root = Path(__file__).resolve().parents[1]
     run_id = args.run_id or _make_run_id("notebooklm_on_demand")
-    notebook_id = _to_notebook_id(args.notebook_id) or _read_default_notebook_id(root)
+    notebook_id = (
+        _to_notebook_id(args.notebook_id)
+        or _read_default_notebook_id(root)
+        or _read_notebook_id_from_env()
+    )
     if not notebook_id:
-        _print_result(
-            _make_result(
-                ok=False,
-                run_id=run_id,
-                action=args.action,
-                notebook_id=None,
-                source_id=args.source_id,
-                error=(
-                    "notebook_id is required when source-id is not enough. "
-                    "Run 'python main.py' once to generate .notebooklm_id or provide --notebook-id."
-                ),
+        if not args.dry_run:
+            _print_result(
+                _make_result(
+                    ok=False,
+                    run_id=run_id,
+                    action=args.action,
+                    notebook_id=None,
+                    source_id=args.source_id,
+                    error=(
+                        "notebook_id is required when source-id is not enough. "
+                        "Run 'python main.py' once to generate .notebooklm_id or provide --notebook-id."
+                    ),
+                )
             )
-        )
-        return 1
+            return 1
+        notebook_id = "DRY_RUN_PLACEHOLDER"
 
     if args.dry_run:
         cmd = _build_command(
