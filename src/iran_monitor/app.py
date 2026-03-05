@@ -20,6 +20,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -38,6 +39,9 @@ from .reporter import build_report_text, send_telegram_report, send_telegram_ale
 from .scrapers.rss_feed import scrape_rss
 from .scrapers.social_media import scrape_social_media
 from .scrapers.uae_media import scrape_uae_media
+from .sources import collect_tier0_signals, collect_tier1_signals, collect_tier2_signals
+from .state_engine import build_state_payload
+from .storage import append_jsonl, ensure_layout, save_json
 from .storage_adapter import build_article_rows, build_outbox_rows, build_run_payload
 from .storage_backend import get_existing_canonical_urls, persist_run_backend
 
@@ -69,8 +73,17 @@ def _resolve_storage_path(value: str) -> Path:
 
 NOTEBOOKLM_ID_FILE = _resolve_storage_path(settings.NOTEBOOKLM_ID_FILE)
 HEALTH_STATE_FILE = _resolve_storage_path(settings.HEALTH_STATE_FILE)
+HYIE_STATE_FILE = _resolve_storage_path(settings.HYIE_STATE_FILE)
+HYIE_EGRESS_ETA_FILE = _resolve_storage_path(settings.HYIE_EGRESS_ETA_FILE)
+HYIE_INGEST_LOCK_FILE = _resolve_storage_path(settings.HYIE_INGEST_LOCK_FILE)
+HYIE_STATE_META_FILE = _resolve_storage_path(settings.HYIE_STATE_META_FILE)
+DUBAI_TZ = ZoneInfo("Asia/Dubai")
 
 _LOCK_HELD_BY_CURRENT_PROCESS = False
+
+
+def _now_dubai() -> datetime:
+    return datetime.now(DUBAI_TZ)
 
 
 def _article_hash(article: dict) -> str:
@@ -623,9 +636,277 @@ async def _probe_sources() -> dict[str, Any]:
     }
 
 
+def _acquire_hyie_ingest_lock() -> bool:
+    HYIE_INGEST_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    if HYIE_INGEST_LOCK_FILE.exists():
+        try:
+            data = json.loads(HYIE_INGEST_LOCK_FILE.read_text(encoding="utf-8"))
+            created_at = str(data.get("created_at") or "")
+            if created_at:
+                created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                age_sec = (_now_dubai() - created_dt.astimezone(DUBAI_TZ)).total_seconds()
+                if age_sec > 900:
+                    HYIE_INGEST_LOCK_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    try:
+        fd = os.open(str(HYIE_INGEST_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"pid": os.getpid(), "created_at": _now_dubai().isoformat(timespec="seconds")}, handle)
+        return True
+    except FileExistsError:
+        return False
+    except Exception as exc:
+        logger.warning("HyIE 락 획득 실패", error=str(exc), lock_file=str(HYIE_INGEST_LOCK_FILE))
+        return False
+
+
+def _release_hyie_ingest_lock() -> None:
+    try:
+        if HYIE_INGEST_LOCK_FILE.exists():
+            HYIE_INGEST_LOCK_FILE.unlink()
+    except Exception as exc:
+        logger.warning("HyIE 락 해제 실패", error=str(exc), lock_file=str(HYIE_INGEST_LOCK_FILE))
+
+
+def _load_manual_egress_eta_h() -> float | None:
+    if not HYIE_EGRESS_ETA_FILE.exists():
+        return None
+    try:
+        payload = json.loads(HYIE_EGRESS_ETA_FILE.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        raw_hours = payload.get("egress_loss_eta_h")
+        if raw_hours is None:
+            return None
+        hours = float(raw_hours)
+        if hours < 0:
+            return 0.0
+        return hours
+    except Exception as exc:
+        logger.warning("manual Egress ETA 파일 읽기 실패", error=str(exc), path=str(HYIE_EGRESS_ETA_FILE))
+        return None
+
+
+def _load_previous_hyie_state() -> dict[str, Any] | None:
+    if not HYIE_STATE_FILE.exists():
+        return None
+    try:
+        return json.loads(HYIE_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("기존 HyIE 상태 읽기 실패", error=str(exc), path=str(HYIE_STATE_FILE))
+        return None
+
+
+def _article_to_signal(article: dict[str, Any], ts_iso: str) -> dict[str, Any]:
+    title = str(article.get("title") or "")
+    source = str(article.get("source") or "monitor_feed")
+    link = str(article.get("link") or "")
+    body = f"{title} {link} {source}".lower()
+
+    indicator_ids: list[str] = []
+    tags: set[str] = set()
+    score = 0.45
+
+    if any(k in body for k in ("travel advisory", "do not travel", "ordered departure", "여행경보", "특별여행주의보")):
+        indicator_ids.extend(["I01", "I07"])
+        score = max(score, 0.82)
+    if any(k in body for k in ("flight", "airspace", "etihad", "emirates", "notam", "airport")):
+        indicator_ids.append("I02")
+        score = max(score, 0.78)
+        tags.add("air_update")
+    if any(k in body for k in ("missile", "drone", "strike", "explosion", "attack")):
+        indicator_ids.append("I03")
+        score = max(score, 0.88)
+        tags.add("strike")
+    if any(k in body for k in ("border", "road", "checkpoint", "curfew", "restricted")):
+        indicator_ids.append("I04")
+        score = max(score, 0.7)
+        tags.add("border_restricted")
+    if any(k in body for k in ("outage", "internet", "etisalat", "du", "aws", "azure")):
+        indicator_ids.append("I05")
+        score = max(score, 0.68)
+        tags.add("comms")
+    if any(k in body for k in ("fuel", "food", "supply", "supermarket", "shortage")):
+        indicator_ids.append("I06")
+        score = max(score, 0.62)
+    if any(k in body for k in ("evacuation", "evac", "military flight", "leave immediately")):
+        indicator_ids.append("I07")
+        score = max(score, 0.8)
+
+    if not indicator_ids:
+        indicator_ids = ["I03"]
+        score = max(score, 0.4)
+
+    return {
+        "source_id": f"article::{source}",
+        "source": source,
+        "tier": "TIER1",
+        "indicator_ids": sorted(set(indicator_ids)),
+        "score": score,
+        "confirmed": True,
+        "ts": ts_iso,
+        "summary": title or "article signal",
+        "tags": sorted(tags),
+    }
+
+
+async def _collect_hyie_source_signals(now_dt: datetime) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    timeout_sec = float(settings.HYIE_SOURCE_TIMEOUT_SEC)
+    calls = await asyncio.gather(
+        collect_tier0_signals(timeout_sec=timeout_sec, now=now_dt),
+        collect_tier1_signals(timeout_sec=timeout_sec, now=now_dt),
+        collect_tier2_signals(timeout_sec=timeout_sec, now=now_dt),
+        return_exceptions=True,
+    )
+    signals: list[dict[str, Any]] = []
+    health: dict[str, Any] = {}
+    for idx, result in enumerate(calls):
+        tier_name = f"tier{idx}"
+        if isinstance(result, Exception):
+            health[f"{tier_name}_collector"] = {
+                "name": tier_name,
+                "tier": tier_name.upper(),
+                "status": "collector_error",
+                "ok": False,
+                "checked_at": now_dt.isoformat(timespec="seconds"),
+                "error": str(result),
+            }
+            continue
+        tier_signals, tier_health = result
+        signals.extend(tier_signals)
+        health.update(tier_health)
+    return signals, health
+
+
+def _persist_hyie_state(payload: dict[str, Any]) -> bool:
+    root = _storage_root()
+    ensure_layout(root)
+
+    state_hash_payload = {
+        "indicators": payload.get("indicators", []),
+        "hypotheses": payload.get("hypotheses", []),
+        "routes": payload.get("routes", []),
+        "triggers": payload.get("triggers", {}),
+        "degraded": payload.get("degraded"),
+        "egress_loss_eta": payload.get("egress_loss_eta"),
+        "evidence_conf": payload.get("evidence_conf"),
+    }
+    state_hash = hashlib.sha1(
+        json.dumps(state_hash_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    previous_hash = None
+    if HYIE_STATE_META_FILE.exists():
+        try:
+            meta_payload = json.loads(HYIE_STATE_META_FILE.read_text(encoding="utf-8"))
+            if isinstance(meta_payload, dict):
+                previous_hash = str(meta_payload.get("state_hash") or "")
+        except Exception:
+            previous_hash = None
+
+    save_json(HYIE_STATE_FILE, payload)
+    save_json(
+        HYIE_STATE_META_FILE,
+        {
+            "state_hash": state_hash,
+            "state_ts": payload.get("state_ts"),
+            "updated_at": _now_dubai().isoformat(timespec="seconds"),
+        },
+    )
+
+    changed = state_hash != previous_hash
+    if not changed:
+        return False
+
+    state_ts = str(payload.get("state_ts") or _now_dubai().isoformat())
+    date_part = state_ts[:10]
+    hour_part = state_ts[11:13] + "-00"
+
+    if settings.HYIE_APPEND_REPORTS_JSONL:
+        append_jsonl(
+            root / "reports" / f"{date_part}.jsonl",
+            {
+                "kind": "hyie_state",
+                "state_ts": state_ts,
+                "status": payload.get("status"),
+                "degraded": payload.get("degraded"),
+                "delta_score": payload.get("delta_score"),
+                "evidence_conf": payload.get("evidence_conf"),
+                "effective_threshold": payload.get("effective_threshold"),
+                "flags": payload.get("flags", []),
+            },
+        )
+
+    if settings.HYIE_APPEND_URGENTDASH_JSONL:
+        snapshot_payload = {
+            "snapshot_ts": state_ts,
+            "state_ts": state_ts,
+            "status": payload.get("status"),
+            "degraded": payload.get("degraded"),
+            "source_health": payload.get("source_health", {}),
+            "flags": payload.get("flags", []),
+            "triggers": payload.get("triggers", {}),
+            "intel_feed": payload.get("intel_feed", []),
+            "indicators": payload.get("indicators", []),
+            "hypotheses": payload.get("hypotheses", []),
+            "routes": payload.get("routes", []),
+            "checklist": payload.get("checklist", []),
+        }
+        daily_jsonl = root / "urgentdash_snapshots" / f"{date_part}.jsonl"
+        hourly_json = root / "urgentdash_snapshots" / date_part / f"{hour_part}.json"
+        append_jsonl(daily_jsonl, snapshot_payload)
+        save_json(hourly_json, snapshot_payload)
+
+    return True
+
+
+async def _update_hyie_state(all_articles: list[dict[str, Any]], run_ts: str, flags: list[str]) -> dict[str, Any] | None:
+    if not settings.HYIE_ENABLED:
+        return None
+
+    if not _acquire_hyie_ingest_lock():
+        flags.append("HYIE_LOCKED_SKIP")
+        logger.warning("HyIE 상태 갱신 스킵 (락 점유 중)", lock_file=str(HYIE_INGEST_LOCK_FILE))
+        return None
+
+    try:
+        now_dt = _now_dubai()
+        source_signals, source_health = await _collect_hyie_source_signals(now_dt)
+
+        article_signals = [_article_to_signal(article, run_ts) for article in all_articles]
+        signals = source_signals + article_signals
+        prev_state = _load_previous_hyie_state()
+        manual_eta_h = _load_manual_egress_eta_h()
+        payload = build_state_payload(
+            signals=signals,
+            source_health=source_health,
+            prev_state=prev_state,
+            manual_egress_eta_h=manual_eta_h,
+        )
+        changed = _persist_hyie_state(payload)
+
+        if payload.get("degraded"):
+            flags.append("HYIE_DEGRADED")
+        if payload.get("status") == "warming_up":
+            flags.append("HYIE_WARMING_UP")
+        if not changed:
+            flags.append("HYIE_NO_DELTA")
+        return payload
+    except Exception as exc:
+        logger.warning("HyIE 상태 갱신 실패, 기존 파이프라인 계속 진행", error=str(exc))
+        flags.append("HYIE_UPDATE_FAILED")
+        return None
+    finally:
+        _release_hyie_ingest_lock()
+
+
 async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) -> None:
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    run_ts = datetime.now().isoformat()
+    now_dt = _now_dubai()
+    now = now_dt.strftime("%Y-%m-%d %H:%M")
+    run_ts = now_dt.isoformat(timespec="seconds")
     logger.info("모니터링 사이클 시작", run_at=now, run_ts=run_ts)
     flags: list[str] = []
 
@@ -654,6 +935,16 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
 
         all_articles = list(uae_articles) + list(social_articles) + list(rss_articles)
         logger.info("기사 수집 완료", total=len(all_articles))
+
+        hyie_payload = await _update_hyie_state(all_articles, run_ts, flags)
+        if hyie_payload:
+            logger.info(
+                "HyIE 상태 갱신 완료",
+                status=hyie_payload.get("status"),
+                degraded=hyie_payload.get("degraded"),
+                evidence_conf=hyie_payload.get("evidence_conf"),
+                delta_score=hyie_payload.get("delta_score"),
+            )
 
         new_articles = _filter_new_persistent(all_articles)
         logger.info("신규 기사 필터링 완료", new_count=len(new_articles))

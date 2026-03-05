@@ -1,6 +1,7 @@
 import "./globals.css";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import AutoRefresh from "./components/AutoRefresh";
 
 export const metadata = {
   title: "Iran-UAE Monitor Dashboard",
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="ko">
       <body>
         <main>
+          <AutoRefresh />
           <header style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 16 }}>
             <div style={{ fontWeight: 700 }}>Iran‑UAE Monitor</div>
             <nav style={{ display: "flex", gap: 12, fontSize: 14 }}>
