@@ -46,6 +46,8 @@ def build_run_payload(
     analysis: AnalysisResult,
     notebook_url: str | None,
     articles: list[dict],
+    new_urls: list[str] | None = None,
+    updated_urls: list[str] | None = None,
     flags: Iterable[str] | None = None,
     run_ts: str | None = None,
 ) -> dict:
@@ -62,6 +64,9 @@ def build_run_payload(
     summary_ad = f"Abu Dhabi({ad_level}): {summary}" if summary else f"Abu Dhabi({ad_level})"
     summary_dxb = f"Dubai({dxb_level}): {summary}" if summary else f"Dubai({dxb_level})"
 
+    delta_new = sorted(set(new_urls if new_urls is not None else links_sorted))
+    delta_updated = sorted(set(updated_urls or []))
+
     return {
         "run_id": run_id,
         "run_ts": run_ts,
@@ -70,7 +75,7 @@ def build_run_payload(
         "sentiment": analysis.get("sentiment", "일반"),
         "summary_ad": summary_ad,
         "summary_dxb": summary_dxb,
-        "delta": {"NEW": links_sorted, "UPDATED": [], "REMOVED": []},
+        "delta": {"NEW": delta_new, "UPDATED": delta_updated, "REMOVED": []},
         "flags": sorted(set(flags or [])),
         "evidence": {"links": links_sorted, "hash": evidence_hash},
         "notebook_url": notebook_url or "",

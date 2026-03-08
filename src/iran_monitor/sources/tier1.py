@@ -80,7 +80,7 @@ TIER1_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier1_azure_status",
         name="Azure Status",
-        url="https://azure.status.microsoft.com/en-us/status",
+        url="https://azure.status.microsoft/en-us/status",
         tier="TIER1",
         indicator_ids=("I05",),
         keywords=("degraded", "outage", "service issue", "incident"),

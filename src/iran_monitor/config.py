@@ -34,7 +34,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # RSS
-    RSS_ENABLE_AP_FEED: bool = True
+    # AP RSS endpoint has been intermittently DNS-broken in GitHub-hosted runners.
+    # Keep it opt-in until a stable official feed endpoint is available again.
+    RSS_ENABLE_AP_FEED: bool = False
     RSS_TIMEOUT_SEC: int = 15
     RSS_LOG_VERBOSE_ERRORS: bool = False
     RSS_USER_AGENT: str = "Iran-UAE-Monitor/1.0"

@@ -26,6 +26,8 @@ def _classify_error(exc: Exception) -> str:
     if isinstance(exc, httpx.ReadTimeout | httpx.ConnectTimeout | httpx.TimeoutException):
         return "timeout"
     if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code in (401, 403):
+            return "blocked"
         return "http_non_2xx"
     if isinstance(exc, httpx.TooManyRedirects):
         return "rate_limited"

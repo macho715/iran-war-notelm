@@ -44,7 +44,7 @@ from .sources import collect_tier0_signals, collect_tier1_signals, collect_tier2
 from .state_engine import build_state_payload
 from .storage import append_jsonl, ensure_layout, save_json
 from .storage_adapter import build_article_rows, build_outbox_rows, build_run_payload
-from .storage_backend import get_existing_canonical_urls, persist_run_backend
+from .storage_backend import get_existing_article_index, get_existing_canonical_urls, persist_run_backend
 
 logger = structlog.get_logger()
 _CROSS_CHECK_KEYWORDS = ("missile", "drone", "strike", "attack", "explosion", "warning")
@@ -109,6 +109,10 @@ def _unique_by_canonical_url(articles: list[dict]) -> list[dict]:
     return out
 
 
+def _normalize_title(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
 def _filter_new_persistent(all_articles: list[dict]) -> list[dict]:
     """Phase 4 핵심: 재시작/크론에서도 중복 제거가 유지되어야 함.
 
@@ -142,6 +146,83 @@ def _filter_new_persistent(all_articles: list[dict]) -> list[dict]:
     except Exception as exc:
         logger.warning("DB 기반 dedup 실패 -> in-process dedup으로 fallback", error=str(exc))
         return _filter_new_in_process(unique)
+
+
+def _classify_persistent_article_changes(all_articles: list[dict]) -> dict[str, Any]:
+    """Classify dedup results into new / updated / unchanged buckets.
+
+    Updated means the canonical URL already exists but the observed title changed.
+    This lets the pipeline react to materially updated live articles without
+    treating every existing URL as fresh content.
+    """
+    unique = _unique_by_canonical_url(all_articles)
+
+    if not settings.STORAGE_ENABLED or not settings.DEDUP_USE_DB or os.getenv("PYTEST_CURRENT_TEST"):
+        fresh = _filter_new_in_process(unique)
+        return {
+            "fresh_articles": fresh,
+            "new_articles": fresh,
+            "updated_articles": [],
+            "new_count": len(fresh),
+            "updated_count": 0,
+            "fresh_count": len(fresh),
+            "unique_count": len(unique),
+        }
+
+    try:
+        storage_root = _storage_root()
+        db_path = _resolve_storage_path(settings.STORAGE_DB_PATH)
+        schema_path = _resolve_storage_path(settings.STORAGE_SCHEMA_PATH)
+
+        urls = [str(a["canonical_url"]) for a in unique if a.get("canonical_url")]
+        existing_index = get_existing_article_index(
+            root=storage_root,
+            sqlite_db_path=db_path,
+            sqlite_schema_path=schema_path,
+            canonical_urls=urls,
+        )
+
+        new_candidates: list[dict] = []
+        updated_candidates: list[dict] = []
+        for article in unique:
+            canonical_url = str(article.get("canonical_url") or "")
+            existing = existing_index.get(canonical_url)
+            if not existing:
+                new_candidates.append(article)
+                continue
+
+            current_title = _normalize_title(article.get("title"))
+            previous_title = _normalize_title(existing.get("title"))
+            if current_title and current_title != previous_title:
+                updated_candidates.append(article)
+
+        fresh_articles = _filter_new_in_process(new_candidates + updated_candidates)
+        fresh_urls = {str(article.get("canonical_url") or "") for article in fresh_articles}
+        new_articles = [article for article in new_candidates if str(article.get("canonical_url") or "") in fresh_urls]
+        updated_articles = [
+            article for article in updated_candidates if str(article.get("canonical_url") or "") in fresh_urls
+        ]
+        return {
+            "fresh_articles": fresh_articles,
+            "new_articles": new_articles,
+            "updated_articles": updated_articles,
+            "new_count": len(new_articles),
+            "updated_count": len(updated_articles),
+            "fresh_count": len(fresh_articles),
+            "unique_count": len(unique),
+        }
+    except Exception as exc:
+        logger.warning("DB 기반 article change 분류 실패 -> in-process dedup으로 fallback", error=str(exc))
+        fresh = _filter_new_in_process(unique)
+        return {
+            "fresh_articles": fresh,
+            "new_articles": fresh,
+            "updated_articles": [],
+            "new_count": len(fresh),
+            "updated_count": 0,
+            "fresh_count": len(fresh),
+            "unique_count": len(unique),
+        }
 
 
 def _filter_new_in_process(articles: list[dict]) -> list[dict]:
@@ -592,6 +673,8 @@ def _persist_storage(
     *,
     analysis: AnalysisResult,
     articles: list[dict],
+    new_articles: list[dict] | None,
+    updated_articles: list[dict] | None,
     report_text: str,
     notebook_url: str | None,
     flags: list[str],
@@ -603,7 +686,16 @@ def _persist_storage(
     sqlite_db_path = _resolve_storage_path(settings.STORAGE_DB_PATH)
     sqlite_schema_path = _resolve_storage_path(settings.STORAGE_SCHEMA_PATH)
 
-    run_payload = build_run_payload(analysis=analysis, notebook_url=notebook_url, articles=articles, flags=flags)
+    new_urls = [str(a.get("canonical_url") or a.get("link") or "").strip() for a in (new_articles or [])]
+    updated_urls = [str(a.get("canonical_url") or a.get("link") or "").strip() for a in (updated_articles or [])]
+    run_payload = build_run_payload(
+        analysis=analysis,
+        notebook_url=notebook_url,
+        articles=articles,
+        new_urls=[u for u in new_urls if u],
+        updated_urls=[u for u in updated_urls if u],
+        flags=flags,
+    )
     article_rows = build_article_rows(articles=articles, run_ts=run_payload["run_ts"])
 
     outbox_rows: list[dict] = []
@@ -865,7 +957,14 @@ def _persist_hyie_state(payload: dict[str, Any]) -> bool:
     return True
 
 
-def _inject_ai_analysis_into_hyie_state(analysis: AnalysisResult, notebook_url: str | None) -> None:
+def _inject_ai_analysis_into_hyie_state(
+    analysis: AnalysisResult,
+    notebook_url: str | None,
+    *,
+    run_ts: str | None = None,
+    counts: dict[str, int] | None = None,
+    flags: list[str] | None = None,
+) -> None:
     """AI 분석 결과를 hyie_state.json에 병합 (urgentdash React 앱에서 표시 가능)."""
     if not HYIE_STATE_FILE.exists():
         return
@@ -884,6 +983,13 @@ def _inject_ai_analysis_into_hyie_state(analysis: AnalysisResult, notebook_url: 
             "notebook_url": notebook_url,
             "updated_at": _now_dubai().isoformat(timespec="seconds"),
         }
+        if run_ts:
+            payload["last_run_ts"] = run_ts
+        if counts is not None:
+            payload["counts"] = counts
+            payload["last_article_count"] = int(counts.get("fresh_count", counts.get("new_count", 0)))
+        if flags is not None:
+            payload["last_flags"] = sorted(set(flags))
         save_json(HYIE_STATE_FILE, payload)
         logger.info(
             "HyIE state AI 분석 결과 주입 완료",
@@ -978,35 +1084,60 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
                 delta_score=hyie_payload.get("delta_score"),
             )
 
-        new_articles = _filter_new_persistent(all_articles)
-        logger.info("신규 기사 필터링 완료", new_count=len(new_articles))
+        article_changes = _classify_persistent_article_changes(all_articles)
+        fresh_articles = article_changes["fresh_articles"]
+        new_articles = article_changes["new_articles"]
+        updated_articles = article_changes["updated_articles"]
+        counts = {
+            "new_count": int(article_changes["new_count"]),
+            "updated_count": int(article_changes["updated_count"]),
+            "fresh_count": int(article_changes["fresh_count"]),
+            "total_count": len(all_articles),
+            "unique_count": int(article_changes["unique_count"]),
+        }
+        logger.info(
+            "기사 dedup 분류 완료",
+            total_count=len(all_articles),
+            unique_count=counts["unique_count"],
+            new_count=counts["new_count"],
+            updated_count=counts["updated_count"],
+            fresh_count=counts["fresh_count"],
+        )
 
-        if not new_articles:
+        if not fresh_articles:
             analysis = _fallback_analysis(all_articles)
             flags.append("NO_NEW_ARTICLES")
-            _inject_ai_analysis_into_hyie_state(analysis, None)
-            _persist_storage(analysis=analysis, articles=[], report_text="", notebook_url=None, flags=flags)
+            _inject_ai_analysis_into_hyie_state(analysis, None, run_ts=run_ts, counts=counts, flags=flags)
+            _persist_storage(
+                analysis=analysis,
+                articles=[],
+                new_articles=[],
+                updated_articles=[],
+                report_text="",
+                notebook_url=None,
+                flags=flags,
+            )
             _write_health_state(
                 "ok",
                 last_success_at=run_ts,
                 last_article_count=0,
                 last_run_ts=run_ts,
-                counts={"new_count": 0, "total_count": len(all_articles), "unique_count": 0},
+                counts=counts,
             )
             logger.info("새로운 소식 없음, 보고 전송 생략")
             return
 
         loop = asyncio.get_event_loop()
 
-        notebook_context = await loop.run_in_executor(None, _upload_to_notebooklm, new_articles)
+        notebook_context = await loop.run_in_executor(None, _upload_to_notebooklm, fresh_articles)
         if not notebook_context:
             flags.append("NOTEBOOK_UPLOAD_FAILED")
 
-        analysis = await loop.run_in_executor(None, _analyze_phase2, new_articles, notebook_context)
-        analysis = _apply_verification_gate(analysis, new_articles)
+        analysis = await loop.run_in_executor(None, _analyze_phase2, fresh_articles, notebook_context)
+        analysis = _apply_verification_gate(analysis, fresh_articles)
         notebook_url = (notebook_context or {}).get("notebook_url")
 
-        _inject_ai_analysis_into_hyie_state(analysis, notebook_url)
+        _inject_ai_analysis_into_hyie_state(analysis, notebook_url, run_ts=run_ts, counts=counts, flags=flags)
 
         if should_send_immediate_alert(analysis, settings.PHASE2_ALERT_LEVELS) and analysis.get("analysis_verified", True):
             alert_ok = await send_telegram_alert(_build_immediate_alert_message(analysis, notebook_url=notebook_url))
@@ -1019,12 +1150,12 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
         if settings.PHASE2_PODCAST_ENABLED:
             await loop.run_in_executor(None, _maybe_create_podcast_scaffold, notebook_context)
 
-        report_text = build_report_text(new_articles, analysis=analysis, notebook_url=notebook_url)
+        report_text = build_report_text(fresh_articles, analysis=analysis, notebook_url=notebook_url)
         if dry_run:
             send_status = {"telegram": False, "whatsapp": False, "approved": False}
         else:
             send_status = await send_telegram_report(
-                new_articles,
+                fresh_articles,
                 analysis=analysis,
                 notebook_url=notebook_url,
                 approval_required=approval_required,
@@ -1038,7 +1169,9 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
 
         _persist_storage(
             analysis=analysis,
-            articles=new_articles,
+            articles=fresh_articles,
+            new_articles=new_articles,
+            updated_articles=updated_articles,
             report_text=report_text,
             notebook_url=notebook_url,
             flags=flags,
@@ -1047,13 +1180,9 @@ async def hourly_job(*, approval_required: bool = False, dry_run: bool = False) 
         _write_health_state(
             "ok",
             last_success_at=run_ts,
-            last_article_count=len(new_articles),
+            last_article_count=len(fresh_articles),
             last_run_ts=run_ts,
-            counts={
-                "new_count": len(new_articles),
-                "total_count": len(all_articles),
-                "unique_count": len(new_articles),
-            },
+            counts=counts,
         )
         logger.info(
             "보고 완료",

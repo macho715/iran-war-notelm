@@ -19,7 +19,7 @@ TIER0_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier0_kr_mofa_0404",
         name="KR MOFA 0404",
-        url="https://www.0404.go.kr/dev/newest_list.mofa",
+        url="https://www.0404.go.kr/",
         tier="TIER0",
         indicator_ids=("I01", "I07"),
         keywords=("여행경보", "특별여행주의보", "철수권고", "즉시 출국", "leave immediately"),
@@ -68,7 +68,7 @@ TIER0_SPECS: list[SourceSpec] = [
     SourceSpec(
         source_id="tier0_uae_mod",
         name="UAE Ministry of Defence",
-        url="https://www.mod.gov.ae/en/media-center/news.aspx",
+        url="https://mod.gov.ae/category/news/",
         tier="TIER0",
         indicator_ids=("I03",),
         keywords=("missile", "drone", "intercepted", "attack", "operation"),

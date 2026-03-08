@@ -113,6 +113,29 @@ def get_existing_canonical_urls(
     return _existing_urls_sqlite(db_path=sqlite_db_path, schema_path=sqlite_schema_path, urls=urls)
 
 
+def get_existing_article_index(
+    *,
+    root: Path,
+    sqlite_db_path: Path,
+    sqlite_schema_path: Path,
+    canonical_urls: Sequence[str],
+) -> dict[str, dict[str, Any]]:
+    """Return existing article metadata keyed by canonical_url."""
+    urls = [u.strip() for u in canonical_urls if u and str(u).strip()]
+    if not urls:
+        return {}
+
+    backend = _backend()
+    if backend == "postgres" and (settings.DATABASE_URL or "").strip():
+        return _existing_article_index_postgres(
+            dsn=settings.DATABASE_URL.strip(),
+            schema_path=_resolve(root, settings.STORAGE_PG_SCHEMA_PATH),
+            urls=urls,
+        )
+
+    return _existing_article_index_sqlite(db_path=sqlite_db_path, schema_path=sqlite_schema_path, urls=urls)
+
+
 def _existing_urls_sqlite(db_path: Path, schema_path: Path, urls: Sequence[str]) -> set[str]:
     conn = connect_sqlite(db_path)
     try:
@@ -127,6 +150,31 @@ def _existing_urls_sqlite(db_path: Path, schema_path: Path, urls: Sequence[str])
         conn.close()
 
 
+def _existing_article_index_sqlite(
+    db_path: Path,
+    schema_path: Path,
+    urls: Sequence[str],
+) -> dict[str, dict[str, Any]]:
+    conn = connect_sqlite(db_path)
+    try:
+        init_db(conn, schema_path)
+        placeholders = ",".join("?" for _ in urls)
+        rows = conn.execute(
+            f"SELECT canonical_url, title, source, last_seen_ts FROM articles WHERE canonical_url IN ({placeholders})",
+            list(urls),
+        ).fetchall()
+        return {
+            str(r[0]): {
+                "title": r[1],
+                "source": r[2],
+                "last_seen_ts": r[3],
+            }
+            for r in rows
+        }
+    finally:
+        conn.close()
+
+
 def _existing_urls_postgres(dsn: str, schema_path: Path, urls: Sequence[str]) -> set[str]:
     import psycopg  # type: ignore
 
@@ -135,6 +183,30 @@ def _existing_urls_postgres(dsn: str, schema_path: Path, urls: Sequence[str]) ->
         with conn.cursor() as cur:
             cur.execute("SELECT canonical_url FROM articles WHERE canonical_url = ANY(%s)", (list(urls),))
             return {str(r[0]) for r in cur.fetchall()}
+
+
+def _existing_article_index_postgres(
+    dsn: str,
+    schema_path: Path,
+    urls: Sequence[str],
+) -> dict[str, dict[str, Any]]:
+    import psycopg  # type: ignore
+
+    with psycopg.connect(dsn) as conn:
+        _init_postgres(conn, schema_path)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT canonical_url, title, source, last_seen_ts FROM articles WHERE canonical_url = ANY(%s)",
+                (list(urls),),
+            )
+            return {
+                str(r[0]): {
+                    "title": r[1],
+                    "source": r[2],
+                    "last_seen_ts": r[3],
+                }
+                for r in cur.fetchall()
+            }
 
 
 def _persist_postgres(

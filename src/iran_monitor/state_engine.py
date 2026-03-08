@@ -386,8 +386,12 @@ def build_state_payload(
 
     joined_text = " ".join(str(s.get("summary") or "") for s in signals).lower()
     failed_sources = [k for k, v in source_health.items() if not bool(v.get("ok"))]
+    hard_failed_sources = [
+        k for k, v in source_health.items()
+        if not bool(v.get("ok")) and str(v.get("status") or "") != "blocked"
+    ]
     health_count = len(source_health) or 1
-    fail_ratio = len(failed_sources) / health_count
+    fail_ratio = len(hard_failed_sources) / health_count
 
     triggers = {
         "red_imminent": False,
@@ -401,7 +405,7 @@ def build_state_payload(
             any(k in joined_text for k in ("explosion", "missile", "drone", "strike"))
             and any(k in joined_text for k in ("uae", "abu dhabi", "dubai"))
         ),
-        "comms_degraded": len(failed_sources) >= 3,
+        "comms_degraded": len(hard_failed_sources) >= 3,
         "kr_leave_immediately": (
             "leave immediately" in joined_text
             and any(k in joined_text for k in ("korea", "한국", "외교부"))
