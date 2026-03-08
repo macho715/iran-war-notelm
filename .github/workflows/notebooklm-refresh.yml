@@ -1,0 +1,132 @@
+name: NotebookLM Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "NotebookLM action to run"
+        required: true
+        default: report
+        type: choice
+        options:
+          - report
+          - podcast
+          - slides
+      run_id:
+        description: "Dashboard run_id correlation value"
+        required: true
+        type: string
+      source_id:
+        description: "Optional NotebookLM source_id to scope generation"
+        required: false
+        type: string
+      notebook_id:
+        description: "NotebookLM notebook id or full notebook URL"
+        required: false
+        type: string
+      use_mcp:
+        description: "Append MCP-oriented flag when true"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      dry_run:
+        description: "Validate arguments only without calling NotebookLM"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+concurrency:
+  group: notebooklm-refresh-${{ github.event.inputs.run_id }}-${{ github.event.inputs.action }}
+  cancel-in-progress: false
+
+jobs:
+  notebooklm-refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Restore NotebookLM auth profile
+        env:
+          NLM_COOKIES_JSON: ${{ secrets.NLM_COOKIES_JSON }}
+          NLM_METADATA_JSON: ${{ secrets.NLM_METADATA_JSON }}
+        run: |
+          if [ -z "$NLM_COOKIES_JSON" ]; then
+            echo "NLM_COOKIES_JSON not set, skipping profile restore"
+            exit 0
+          fi
+          mkdir -p ~/.notebooklm-mcp-cli/profiles/default
+          chmod 700 ~/.notebooklm-mcp-cli/profiles/default
+          echo "$NLM_COOKIES_JSON" > ~/.notebooklm-mcp-cli/profiles/default/cookies.json
+          chmod 600 ~/.notebooklm-mcp-cli/profiles/default/cookies.json
+          if [ -n "$NLM_METADATA_JSON" ]; then
+            echo "$NLM_METADATA_JSON" > ~/.notebooklm-mcp-cli/profiles/default/metadata.json
+            chmod 600 ~/.notebooklm-mcp-cli/profiles/default/metadata.json
+          fi
+          echo "NotebookLM profile restored."
+
+      - name: Run NotebookLM on-demand refresh
+        env:
+          NOTEBOOKLM_ON_DEMAND_TIMEOUT_SEC: "300"
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          args=(
+            scripts/notebooklm_on_demand.py
+            --action "${{ github.event.inputs.action }}"
+            --run-id "${{ github.event.inputs.run_id }}"
+          )
+
+          if [ -n "${{ github.event.inputs.source_id }}" ]; then
+            args+=(--source-id "${{ github.event.inputs.source_id }}")
+          fi
+
+          if [ -n "${{ github.event.inputs.notebook_id }}" ]; then
+            args+=(--notebook-id "${{ github.event.inputs.notebook_id }}")
+          fi
+
+          if [ "${{ github.event.inputs.use_mcp }}" = "true" ]; then
+            args+=(--use-mcp)
+          fi
+
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+
+          printf '%s\n' "python ${args[*]}" | tee artifacts/notebooklm-refresh.command.txt
+          python "${args[@]}" 2>&1 | tee artifacts/notebooklm-refresh.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload refresh artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notebooklm-refresh-${{ github.run_id }}
+          path: artifacts
+          if-no-files-found: ignore
+          retention-days: 7
