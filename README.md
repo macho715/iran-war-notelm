@@ -5,6 +5,27 @@
 
 ---
 
+## 🌿 브랜치 가이드 (Branch Guide)
+
+> **❓ "Vercel 배포 브랜치가 어디야?" 혼동 방지 안내**
+
+| 브랜치 | 역할 | 비고 |
+|---|---|---|
+| **`main`** | ✅ **Vercel 프로덕션 배포 브랜치** | `dashboard/` 변경 시 Vercel 자동 빌드/배포 |
+| `urgentdash-live` | 📊 라이브 데이터 전용 브랜치 | CI(GitHub Actions)가 `live/hyie_state.json` 자동 push (코드 변경 없음) |
+| `master` | 🗃️ 구버전 레거시 브랜치 | 사용하지 않음 |
+| `copilot/*` | 🤖 GitHub Copilot 작업 브랜치 | PR 병합 후 삭제 예정 |
+| `feature/*`, `chore/*`, `docs/*`, `pr/*` | 🔧 작업용 개발 브랜치 | PR 병합 후 삭제 예정 |
+
+### Vercel 배포 구조 요약
+
+- **배포 브랜치**: `main`
+- **배포 루트 디렉토리**: `dashboard/` (Vercel 프로젝트 설정의 `Root Directory = dashboard`)
+- **빌드 스킵 조건**: `dashboard/` 하위 파일 변경이 없으면 빌드 건너뜀 (`dashboard/vercel.json` → `scripts/vercel-ignore-dashboard.sh`)
+- **라이브 데이터**: `urgentdash-live` 브랜치의 `live/hyie_state.json` (30분마다 CI가 업데이트)
+
+---
+
 ## ⚠️ Canonical 프로젝트 경로 안내
 
 - 이 루트 프로젝트는 호환 래퍼를 포함한 상위 레이어입니다.
